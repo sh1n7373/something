@@ -1,0 +1,2762 @@
+import sys
+import re
+import json
+import asyncio
+import threading
+import urllib.request
+import subprocess
+from datetime import datetime, timedelta
+from pathlib import Path
+
+APP_VERSION = "2.0"
+GITHUB_RAW_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/Lagos.py"
+GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
+
+try:
+    from PyQt5.QtWidgets import (
+        QApplication, QMainWindow, QWidget, QDialog, QVBoxLayout, QHBoxLayout,
+        QGridLayout, QLabel, QPushButton, QLineEdit, QTextEdit, QPlainTextEdit,
+        QListWidget, QListWidgetItem, QScrollArea, QFrame, QStackedWidget,
+        QAbstractItemView, QMessageBox, QComboBox, QProgressBar, QSizePolicy
+    )
+    from PyQt5.QtCore import (
+        Qt, QTimer, QTime, QPropertyAnimation, QParallelAnimationGroup,
+        QEasingCurve, pyqtSignal, pyqtProperty, QRect, QPointF, QObject
+    )
+    from PyQt5.QtGui import (
+        QPainter, QColor, QLinearGradient, QPen, QFont, QIcon
+    )
+except ImportError as e:
+    print(f"PyQt5 не установлен: {e}", file=sys.stderr)
+    print("Установите: pip3 install PyQt5", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    from telethon import TelegramClient
+    from telethon.errors import (
+        FloodWaitError, UserPrivacyRestrictedError,
+        UsernameNotOccupiedError, PeerFloodError,
+        SessionPasswordNeededError
+    )
+    from telethon.tl.types import User
+except ImportError as e:
+    print(f"Telethon не установлен: {e}", file=sys.stderr)
+    print("Установите: pip3 install telethon", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    import socks
+    SOCKS_AVAILABLE = True
+except ImportError:
+    SOCKS_AVAILABLE = False
+
+DATA_FILE = Path("data.json")
+SESSION_DIR = Path("sessions")
+SESSION_DIR.mkdir(exist_ok=True)
+
+STYLE = """
+QMainWindow, QDialog {
+    background: #1a1d26;
+}
+QWidget {
+    background: #1a1d26;
+    color: #dde3f0;
+    font-family: 'Helvetica Neue', 'Segoe UI', sans-serif;
+    font-size: 13px;
+}
+QPushButton {
+    background: #1e2230;
+    color: #dde3f0;
+    border: 1px solid #323a52;
+    border-radius: 10px;
+    padding: 8px 20px;
+    font-size: 13px;
+    font-weight: 500;
+}
+QPushButton:hover {
+    background: #252c42;
+    border-color: #4a6fa5;
+    color: #ffffff;
+}
+QPushButton:pressed {
+    background: #2d3650;
+    color: #fff;
+}
+QPushButton#primary {
+    background: #1e2230;
+    border: 1px solid #323a52;
+    color: #dde3f0;
+    font-weight: 500;
+}
+QPushButton#primary:hover {
+    background: #252c42;
+    border-color: #4a6fa5;
+    color: #ffffff;
+}
+QPushButton#danger {
+    background: #1e2230;
+    border: 1px solid #323a52;
+    color: #dde3f0;
+}
+QPushButton#danger:hover {
+    background: #252c42;
+    border-color: #4a6fa5;
+    color: #ffffff;
+}
+QLabel {
+    background: transparent;
+}
+QLineEdit, QTextEdit, QPlainTextEdit {
+    background: #141720;
+    border: 1px solid #2c3348;
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: #dde3f0;
+    selection-background-color: #4a6fa5;
+}
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {
+    border-color: #4a6fa5;
+    background: #161a24;
+}
+QListWidget {
+    background: #141720;
+    border: 1px solid #2c3348;
+    border-radius: 8px;
+    outline: none;
+    padding: 4px;
+}
+QListWidget::item {
+    border-radius: 6px;
+    padding: 7px 10px;
+    margin: 1px 2px;
+    color: #a8b8d8;
+}
+QListWidget::item:selected {
+    background: #2a3a5a;
+    color: #e8eef8;
+}
+QListWidget::item:hover {
+    background: #202535;
+}
+QScrollBar:vertical {
+    background: #141720;
+    width: 6px;
+    border-radius: 3px;
+}
+QScrollBar::handle:vertical {
+    background: #2c3a5a;
+    border-radius: 3px;
+    min-height: 30px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #4a6fa5;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QLabel#header {
+    font-size: 22px;
+    font-weight: 700;
+    color: #e8eef8;
+    letter-spacing: -0.5px;
+}
+QLabel#subheader {
+    font-size: 12px;
+    color: #4e5a78;
+}
+QLabel#section {
+    font-size: 10px;
+    font-weight: 700;
+    color: #6b82c0;
+    letter-spacing: 1.8px;
+}
+QFrame#card {
+    background: #1e2230;
+    border: 1px solid #272f42;
+    border-radius: 12px;
+}
+QFrame#separator {
+    background: #252c3e;
+    max-height: 1px;
+    min-height: 1px;
+}
+QProgressBar {
+    background: #1e2230;
+    border: none;
+    border-radius: 3px;
+    height: 5px;
+}
+QProgressBar::chunk {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #4a6fa5, stop:1 #6b9ed4);
+    border-radius: 3px;
+}
+QComboBox {
+    background: #141720;
+    border: 1px solid #2c3348;
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: #dde3f0;
+    min-height: 34px;
+}
+QComboBox:focus {
+    border-color: #4a6fa5;
+}
+QComboBox:on {
+    border-color: #4a6fa5;
+    border-bottom-left-radius: 0px;
+    border-bottom-right-radius: 0px;
+}
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 28px;
+    border-left: 1px solid #2c3348;
+    border-top-right-radius: 8px;
+    border-bottom-right-radius: 8px;
+    background: #1a1f30;
+}
+QComboBox::down-arrow {
+    width: 10px;
+    height: 10px;
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #6b82c0;
+}
+QComboBox QAbstractItemView {
+    background: #141720;
+    border: 1px solid #4a6fa5;
+    border-top: none;
+    border-bottom-left-radius: 8px;
+    border-bottom-right-radius: 8px;
+    selection-background-color: #2a3a5a;
+    selection-color: #e8eef8;
+    color: #dde3f0;
+    outline: none;
+    padding: 4px;
+}
+QComboBox QAbstractItemView::item {
+    padding: 8px 12px;
+    min-height: 30px;
+    border-radius: 4px;
+    margin: 1px 3px;
+    background: transparent;
+    color: #a8b8d8;
+}
+QComboBox QAbstractItemView::item:hover {
+    background: #1e2538;
+    color: #dde3f0;
+}
+QComboBox QAbstractItemView::item:selected {
+    background: #2a3a5a;
+    color: #e8eef8;
+}
+"""
+
+ARROW_BTN_STYLE = """
+QPushButton {
+    background: #1e2538;
+    border: none;
+    border-left: 1px solid #2c3348;
+    color: #6b82c0;
+    font-size: 9px;
+    padding: 0px;
+    min-width: 26px;
+    max-width: 26px;
+}
+QPushButton:hover {
+    background: #253050;
+    color: #a0b8e0;
+}
+QPushButton:pressed {
+    background: #3d5080;
+}
+"""
+
+
+def load_data():
+    if DATA_FILE.exists():
+        try:
+            d = json.loads(DATA_FILE.read_text(encoding="utf-8"))
+            for key in ("proxies", "chat_log", "account_proxies", "account_recipients"):
+                if key not in d:
+                    d[key] = {} if key in ("chat_log", "account_proxies", "account_recipients") else []
+            if "tag_interval_min" not in d:
+                d["tag_interval_min"] = 0
+            if "recipient_dbs" not in d:
+                d["recipient_dbs"] = {}
+            return d
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {
+        "accounts": [],
+        "recipients": [],
+        "pastes": [],
+        "pastes_per_recipient": 1,
+        "proxies": [],
+        "chat_log": {},
+        "account_proxies": {},
+        "account_recipients": {},
+        "recipient_dbs": {},
+        "tag_interval_min": 0,
+    }
+
+
+def recipient_tag(r):
+    if isinstance(r, dict):
+        return r.get("tag", "")
+    return r
+
+
+def recipient_token(r):
+    if isinstance(r, dict):
+        return r.get("token", "")
+    return ""
+
+
+def apply_token(text, token):
+    return re.sub(r'\$token', token, text, flags=re.IGNORECASE)
+
+
+def _parse_recipient_line(line):
+    line = line.strip()
+    m = re.match(r'^(@?\S+)\s*[-]\s*(\$\S+)$', line)
+    if m:
+        tag = m.group(1)
+        token = m.group(2)
+    else:
+        tag = line
+        token = ""
+    if not tag.startswith("@"):
+        tag = "@" + tag
+    return tag, token
+
+
+def save_data(data):
+    DATA_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def build_client(acc, proxy=None):
+    sess = str(SESSION_DIR / acc["phone"].replace("+", ""))
+    if proxy and SOCKS_AVAILABLE:
+        ptype = proxy.get("type", "socks5").lower()
+        pt = socks.SOCKS5
+        if ptype == "socks4":
+            pt = socks.SOCKS4
+        elif ptype == "http":
+            pt = socks.HTTP
+        proxy_tuple = (
+            pt,
+            proxy["host"],
+            int(proxy["port"]),
+            True,
+            proxy.get("user") or None,
+            proxy.get("password") or None,
+        )
+        return TelegramClient(sess, acc["api_id"], acc["api_hash"], proxy=proxy_tuple)
+    return TelegramClient(sess, acc["api_id"], acc["api_hash"])
+
+
+class StyledSpinBox(QWidget):
+    valueChanged = pyqtSignal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._min = 0
+        self._max = 99
+        self._val = 0
+        self._suffix = ""
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self._edit = QLineEdit()
+        self._edit.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self._edit.editingFinished.connect(self._on_edit)
+        layout.addWidget(self._edit)
+        btn_col = QVBoxLayout()
+        btn_col.setContentsMargins(0, 0, 0, 0)
+        btn_col.setSpacing(0)
+        self._up = QPushButton("^")
+        self._up.setFixedSize(28, 24)
+        self._up.setStyleSheet(ARROW_BTN_STYLE + "QPushButton { border-top-right-radius: 8px; border-bottom: 1px solid #2c3348; }")
+        self._up.clicked.connect(self._inc)
+        self._dn = QPushButton("v")
+        self._dn.setFixedSize(28, 24)
+        self._dn.setStyleSheet(ARROW_BTN_STYLE + "QPushButton { border-bottom-right-radius: 8px; }")
+        self._dn.clicked.connect(self._dec)
+        btn_col.addWidget(self._up)
+        btn_col.addWidget(self._dn)
+        layout.addLayout(btn_col)
+        self.setFixedHeight(36)
+        self._edit.setFixedHeight(36)
+        self.setStyleSheet("""
+            QWidget { background: transparent; }
+            QLineEdit {
+                background: #141720;
+                border: 1px solid #2c3348;
+                border-top-right-radius: 0px;
+                border-bottom-right-radius: 0px;
+                border-top-left-radius: 8px;
+                border-bottom-left-radius: 8px;
+                padding: 8px 12px;
+                color: #dde3f0;
+            }
+            QLineEdit:focus { border-color: #4a6fa5; }
+        """)
+
+    def setRange(self, mn, mx):
+        self._min = mn
+        self._max = mx
+
+    def setValue(self, v):
+        self._val = max(self._min, min(self._max, v))
+        self._edit.setText(f"{self._val}{self._suffix}")
+
+    def setSuffix(self, s):
+        self._suffix = s
+        self.setValue(self._val)
+
+    def value(self):
+        return self._val
+
+    def _inc(self):
+        self.setValue(self._val + 1)
+        self.valueChanged.emit(self._val)
+
+    def _dec(self):
+        self.setValue(self._val - 1)
+        self.valueChanged.emit(self._val)
+
+    def _on_edit(self):
+        text = self._edit.text().replace(self._suffix, "").strip()
+        try:
+            self.setValue(int(text))
+        except ValueError:
+            self.setValue(self._val)
+        self._edit.setText(f"{self._val}{self._suffix}")
+        self.valueChanged.emit(self._val)
+
+
+class StyledTimeEdit(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self._edit = QLineEdit()
+        self._edit.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self._edit.editingFinished.connect(self._on_edit)
+        layout.addWidget(self._edit)
+        btn_col = QVBoxLayout()
+        btn_col.setContentsMargins(0, 0, 0, 0)
+        btn_col.setSpacing(0)
+        self._up = QPushButton("^")
+        self._up.setFixedSize(28, 24)
+        self._up.setStyleSheet(ARROW_BTN_STYLE + "QPushButton { border-top-right-radius: 8px; border-bottom: 1px solid #2c3348; }")
+        self._up.clicked.connect(self._inc)
+        self._dn = QPushButton("v")
+        self._dn.setFixedSize(28, 24)
+        self._dn.setStyleSheet(ARROW_BTN_STYLE + "QPushButton { border-bottom-right-radius: 8px; }")
+        self._dn.clicked.connect(self._dec)
+        btn_col.addWidget(self._up)
+        btn_col.addWidget(self._dn)
+        layout.addLayout(btn_col)
+        self.setFixedHeight(36)
+        self._edit.setFixedHeight(36)
+        self.setStyleSheet("""
+            QWidget { background: transparent; }
+            QLineEdit {
+                background: #141720;
+                border: 1px solid #2c3348;
+                border-top-right-radius: 0px;
+                border-bottom-right-radius: 0px;
+                border-top-left-radius: 8px;
+                border-bottom-left-radius: 8px;
+                padding: 8px 12px;
+                color: #dde3f0;
+            }
+            QLineEdit:focus { border-color: #4a6fa5; }
+        """)
+        self._h = 0
+        self._m = 0
+
+    def setTime(self, t):
+        self._h = t.hour()
+        self._m = t.minute()
+        self._refresh()
+
+    def time(self):
+        return QTime(self._h, self._m)
+
+    def _refresh(self):
+        self._edit.setText(f"{self._h:02d}:{self._m:02d}")
+
+    def _inc(self):
+        self._m += 1
+        if self._m >= 60:
+            self._m = 0
+            self._h = (self._h + 1) % 24
+        self._refresh()
+
+    def _dec(self):
+        self._m -= 1
+        if self._m < 0:
+            self._m = 59
+            self._h = (self._h - 1) % 24
+        self._refresh()
+
+    def _on_edit(self):
+        text = self._edit.text().strip()
+        parts = text.split(":")
+        try:
+            h = int(parts[0]) % 24
+            m = int(parts[1]) % 60 if len(parts) > 1 else 0
+            self._h = h
+            self._m = m
+        except (ValueError, IndexError):
+            self._h = 0
+            self._m = 0
+        self._refresh()
+
+
+class SidebarButton(QPushButton):
+    def __init__(self, text, parent=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setText(f"   {text}")
+        self.setFixedHeight(38)
+        self.setCursor(Qt.PointingHandCursor)
+        self._active = False
+        self._update_style()
+
+    def setChecked(self, v):
+        super().setChecked(v)
+        self._active = v
+        self._update_style()
+
+    def _update_style(self):
+        if self._active:
+            self.setStyleSheet("""
+                QPushButton {
+                    background: #1e2a48;
+                    color: #6b9ed4;
+                    border: none;
+                    border-left: 3px solid #4a6fa5;
+                    border-radius: 8px;
+                    text-align: left;
+                    padding-left: 14px;
+                    font-size: 13px;
+                    font-weight: 600;
+                }
+            """)
+        else:
+            self.setStyleSheet("""
+                QPushButton {
+                    background: transparent;
+                    color: #4e5a78;
+                    border: none;
+                    border-left: 3px solid transparent;
+                    border-radius: 8px;
+                    text-align: left;
+                    padding-left: 14px;
+                    font-size: 13px;
+                }
+                QPushButton:hover {
+                    background: #1e2334;
+                    color: #8898c8;
+                }
+            """)
+
+    def enterEvent(self, e):
+        if not self.isChecked():
+            self.setStyleSheet("""
+                QPushButton {
+                    background: #1e2334;
+                    color: #8898c8;
+                    border: none;
+                    border-left: 3px solid transparent;
+                    border-radius: 8px;
+                    text-align: left;
+                    padding-left: 14px;
+                    font-size: 13px;
+                }
+            """)
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._update_style()
+        super().leaveEvent(e)
+
+
+class AnimatedButton(QPushButton):
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self.setStyleSheet("""
+            QPushButton {
+                background: #1e2230;
+                color: #dde3f0;
+                border: 1px solid #323a52;
+                border-radius: 10px;
+                padding: 8px 20px;
+                font-size: 13px;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background: #252c42;
+                border-color: #4a6fa5;
+                color: #ffffff;
+            }
+            QPushButton:pressed {
+                background: #2d3650;
+            }
+            QPushButton:disabled {
+                color: #3a4a68;
+                border-color: #252c3e;
+            }
+        """)
+
+
+class AnimatedProgressBar(QProgressBar):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setTextVisible(False)
+        self.setFixedHeight(5)
+        self.setStyleSheet("""
+            QProgressBar {
+                background: #1e2230;
+                border: none;
+                border-radius: 3px;
+            }
+            QProgressBar::chunk {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #4a6fa5, stop:1 #6b9ed4);
+                border-radius: 3px;
+            }
+        """)
+
+
+class ProxyCheckerWorker(QObject):
+    result_signal = pyqtSignal(int, bool, str)
+    finished_signal = pyqtSignal()
+
+    def __init__(self, proxies):
+        super().__init__()
+        self.proxies = proxies
+        self._stop = False
+
+    def stop(self):
+        self._stop = True
+
+    def run(self):
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(self._check_all())
+        self.finished_signal.emit()
+
+    async def _check_all(self):
+        for i, proxy in enumerate(self.proxies):
+            if self._stop:
+                return
+            ok, info = await self._check_one(proxy)
+            self.result_signal.emit(i, ok, info)
+
+    async def _check_one(self, proxy):
+        if not SOCKS_AVAILABLE:
+            return False, "PySocks не установлен"
+        try:
+            ptype = proxy.get("type", "socks5").lower()
+            pt = socks.SOCKS5
+            if ptype == "socks4":
+                pt = socks.SOCKS4
+            elif ptype == "http":
+                pt = socks.HTTP
+            s = socks.socksocket()
+            s.set_proxy(
+                pt,
+                proxy["host"],
+                int(proxy["port"]),
+                True,
+                proxy.get("user") or None,
+                proxy.get("password") or None,
+            )
+            s.settimeout(8)
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, lambda: s.connect(("api.telegram.org", 443)))
+            s.close()
+            return True, "OK"
+        except Exception as ex:
+            return False, str(ex)[:60]
+
+
+class AuthDialog(QDialog):
+    _sig_status = pyqtSignal(str)
+    _sig_need_password = pyqtSignal()
+    _sig_show_code = pyqtSignal()
+    _sig_done = pyqtSignal(str, str, str, str, str)
+
+    def __init__(self, parent=None, proxy=None):
+        super().__init__(parent)
+        self.setWindowTitle("Добавить аккаунт")
+        self.setMinimumWidth(420)
+        self.setStyleSheet(STYLE)
+        self.result_account = None
+        self._client = None
+        self._phone = ""
+        self._step = "phone"
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._loop.run_forever, daemon=True)
+        self._thread.start()
+        self._sig_status.connect(self._set_status)
+        self._sig_need_password.connect(self._show_password_step)
+        self._sig_show_code.connect(self._show_code_step)
+        self._sig_done.connect(self._on_done)
+        self._proxy = proxy
+        self._dot_timer = QTimer()
+        self._dot_timer.timeout.connect(self._tick_status)
+        self._dots = 0
+        self._build_ui()
+
+    def _build_ui(self):
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(28, 28, 28, 28)
+        lay.setSpacing(14)
+
+        title = QLabel("Подключение аккаунта")
+        title.setStyleSheet("font-size: 18px; font-weight: 700; color: #e8eef8;")
+        lay.addWidget(title)
+
+        link_lbl = QLabel('API ID и API Hash на <a href="https://my.telegram.org" style="color:#6b9ed4;">my.telegram.org</a>')
+        link_lbl.setOpenExternalLinks(True)
+        link_lbl.setStyleSheet("color: #4e5a78; font-size: 12px;")
+        lay.addWidget(link_lbl)
+
+        sep = QFrame()
+        sep.setObjectName("separator")
+        lay.addWidget(sep)
+
+        for lbl_text, attr, ph in [
+            ("API ID", "api_id", "12345678"),
+            ("API HASH", "api_hash", "abcdef1234..."),
+            ("НОМЕР ТЕЛЕФОНА", "phone_edit", "+79001234567"),
+        ]:
+            lbl = QLabel(lbl_text)
+            lbl.setObjectName("section")
+            lay.addWidget(lbl)
+            edit = QLineEdit()
+            edit.setPlaceholderText(ph)
+            setattr(self, attr, edit)
+            lay.addWidget(edit)
+
+        self.code_edit = QLineEdit()
+        self.code_edit.setPlaceholderText("Код из Telegram")
+        self.code_edit.setVisible(False)
+        lay.addWidget(self.code_edit)
+
+        self.pass_edit = QLineEdit()
+        self.pass_edit.setPlaceholderText("Пароль двухэтапной проверки")
+        self.pass_edit.setEchoMode(QLineEdit.Password)
+        self.pass_edit.setVisible(False)
+        lay.addWidget(self.pass_edit)
+
+        self.status_lbl = QLabel("")
+        self.status_lbl.setStyleSheet("color: #6b82c0; font-size: 12px;")
+        self.status_lbl.setWordWrap(True)
+        lay.addWidget(self.status_lbl)
+
+        self.btn = AnimatedButton("Получить код")
+        self.btn.setObjectName("primary")
+        self.btn.clicked.connect(self._on_btn)
+        lay.addWidget(self.btn)
+
+    def _on_btn(self):
+        if self._step == "phone":
+            self._send_code()
+        elif self._step == "code":
+            self._confirm_code()
+        elif self._step == "password":
+            self._confirm_password()
+
+    def _send_code(self):
+        api_id_str = self.api_id.text().strip()
+        api_hash = self.api_hash.text().strip()
+        phone = self.phone_edit.text().strip()
+        if not api_id_str or not api_hash or not phone:
+            self._set_status("Заполните все поля")
+            return
+        try:
+            api_id = int(api_id_str)
+        except ValueError:
+            self._set_status("API ID должен быть числом")
+            return
+        self._phone = phone
+        self._api_id_val = api_id
+        self._api_hash_val = api_hash
+        fake_acc = {"phone": phone, "api_id": api_id, "api_hash": api_hash}
+        self._client = build_client(fake_acc, self._proxy)
+        self.btn.setEnabled(False)
+        self._dots = 0
+        self._dot_timer.start(600)
+
+        async def _do():
+            try:
+                await self._client.connect()
+                await self._client.send_code_request(phone)
+                self._sig_show_code.emit()
+            except Exception as ex:
+                self._sig_status.emit(f"Ошибка: {ex}")
+                self._sig_status.emit("btn_enable")
+
+        asyncio.run_coroutine_threadsafe(_do(), self._loop)
+
+    def _tick_status(self):
+        self._dots = (self._dots + 1) % 4
+        self.status_lbl.setText("Подключаемся к Telegram" + "." * self._dots)
+
+    def _show_code_step(self):
+        self._dot_timer.stop()
+        self._step = "code"
+        self.code_edit.setVisible(True)
+        self.btn.setText("Войти")
+        self.btn.setEnabled(True)
+        self._set_status("Введите код из Telegram")
+
+    def _confirm_code(self):
+        code = self.code_edit.text().strip()
+        if not code:
+            self._set_status("Введите код")
+            return
+        self.btn.setEnabled(False)
+        self._set_status("Проверяем...")
+
+        async def _do():
+            try:
+                await self._client.sign_in(self._phone, code)
+                me = await self._client.get_me()
+                first = me.first_name or ""
+                last = me.last_name or ""
+                username = me.username or ""
+                await self._client.disconnect()
+                self._sig_done.emit(first, last, username, self._phone,
+                                    str(self._api_id_val) + "|" + self._api_hash_val)
+            except SessionPasswordNeededError:
+                self._sig_need_password.emit()
+            except Exception as ex:
+                self._sig_status.emit(f"Ошибка: {ex}")
+                self._sig_status.emit("btn_enable")
+
+        asyncio.run_coroutine_threadsafe(_do(), self._loop)
+
+    def _show_password_step(self):
+        self._step = "password"
+        self.pass_edit.setVisible(True)
+        self.btn.setText("Войти")
+        self.btn.setEnabled(True)
+        self._set_status("Введите пароль двухэтапной проверки")
+
+    def _confirm_password(self):
+        password = self.pass_edit.text().strip()
+        if not password:
+            self._set_status("Введите пароль")
+            return
+        self.btn.setEnabled(False)
+        self._set_status("Проверяем пароль...")
+
+        async def _do():
+            try:
+                await self._client.sign_in(password=password)
+                me = await self._client.get_me()
+                first = me.first_name or ""
+                last = me.last_name or ""
+                username = me.username or ""
+                await self._client.disconnect()
+                self._sig_done.emit(first, last, username, self._phone,
+                                    str(self._api_id_val) + "|" + self._api_hash_val)
+            except Exception as ex:
+                self._sig_status.emit(f"Ошибка: {ex}")
+                self._sig_status.emit("btn_enable")
+
+        asyncio.run_coroutine_threadsafe(_do(), self._loop)
+
+    def _on_done(self, first, last, username, phone, api_str):
+        api_id_str, api_hash = api_str.split("|", 1)
+        name = f"{first} {last}".strip()
+        self.result_account = {
+            "phone": phone,
+            "api_id": int(api_id_str),
+            "api_hash": api_hash,
+            "name": name,
+            "username": username,
+        }
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self.accept()
+
+    def closeEvent(self, e):
+        self._dot_timer.stop()
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        super().closeEvent(e)
+
+    def _set_status(self, text):
+        if text == "btn_enable":
+            self.btn.setEnabled(True)
+            return
+        self.status_lbl.setText(text)
+
+
+class SenderWorker(QObject):
+    log_signal = pyqtSignal(str, str)
+    progress_signal = pyqtSignal(int, int)
+    finished_signal = pyqtSignal()
+    failed_signal = pyqtSignal(str)
+    failed_detail_signal = pyqtSignal(str, str)
+
+    def __init__(self, account, recipients, pastes, interval_min, pastes_per_recipient,
+                 proxy=None, tag_interval_min=0, worker_id=0):
+        super().__init__()
+        self.account = account
+        self.recipients = recipients
+        self.pastes = pastes
+        self.interval_min = interval_min
+        self.pastes_per_recipient = pastes_per_recipient
+        self.proxy = proxy
+        self.tag_interval_min = tag_interval_min
+        self.worker_id = worker_id
+        self._stop = False
+        self._pause = False
+        self._done = 0
+
+    def stop(self):
+        self._stop = True
+
+    def pause(self):
+        self._pause = True
+
+    def resume(self):
+        self._pause = False
+
+    async def _interruptible_sleep(self, seconds):
+        elapsed = 0
+        while elapsed < seconds:
+            if self._stop:
+                return
+            while self._pause:
+                if self._stop:
+                    return
+                await asyncio.sleep(0.5)
+            await asyncio.sleep(1)
+            elapsed += 1
+
+    def run(self):
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(self._send_all())
+        self.finished_signal.emit()
+
+    async def _send_all(self):
+        acc = self.account
+        client = build_client(acc, self.proxy)
+        try:
+            await client.connect()
+            if not await client.is_user_authorized():
+                self.log_signal.emit("Аккаунт не авторизован", "err")
+                await client.disconnect()
+                return
+        except Exception as ex:
+            self.log_signal.emit(f"[W{self.worker_id+1}] Ошибка подключения: {ex}", "err")
+            return
+
+        pastes_to_use = self.pastes
+        total = len(self.recipients) * len(pastes_to_use)
+        self._done = 0
+        prev_tag = None
+
+        for rec in self.recipients:
+            tag = recipient_tag(rec)
+            token = recipient_token(rec)
+
+            if prev_tag is not None and self.tag_interval_min > 0:
+                self.log_signal.emit(
+                    f"[W{self.worker_id+1}] Ждём {self.tag_interval_min} мин...",
+                    "info"
+                )
+                await self._interruptible_sleep(self.tag_interval_min * 60)
+                if self._stop:
+                    await client.disconnect()
+                    return
+
+            prev_tag = tag
+
+            for paste in pastes_to_use:
+                if self._stop:
+                    self.log_signal.emit(f"[W{self.worker_id+1}] Остановлена", "warn")
+                    await client.disconnect()
+                    return
+                while self._pause:
+                    if self._stop:
+                        await client.disconnect()
+                        return
+                    await asyncio.sleep(0.5)
+                try:
+                    text = apply_token(paste, token) if token else paste
+                    await client.send_message(tag, text)
+                    self.log_signal.emit(f"[W{self.worker_id+1}] ok  {tag}", "ok")
+                except FloodWaitError as e:
+                    self.log_signal.emit(f"[W{self.worker_id+1}] Flood {e.seconds}s  {tag}", "warn")
+                    await self._interruptible_sleep(e.seconds)
+                except (UserPrivacyRestrictedError, UsernameNotOccupiedError):
+                    self.log_signal.emit(f"[W{self.worker_id+1}] Недоступен  {tag}", "warn")
+                    self.failed_signal.emit(tag)
+                    self.failed_detail_signal.emit(tag, "Приватность или пользователь не найден")
+                except PeerFloodError:
+                    self.log_signal.emit(f"[W{self.worker_id+1}] PeerFlood, остановка", "err")
+                    await client.disconnect()
+                    return
+                except Exception as ex:
+                    self.log_signal.emit(f"[W{self.worker_id+1}] err  {tag}: {ex}", "err")
+                    self.failed_signal.emit(tag)
+                    self.failed_detail_signal.emit(tag, str(ex))
+                self._done += 1
+                self.progress_signal.emit(self._done, total)
+                if self._done < total and self.tag_interval_min == 0:
+                    await self._interruptible_sleep(self.interval_min * 60)
+
+        await client.disconnect()
+
+
+class ChatLoader(QObject):
+    messages_loaded = pyqtSignal(str, list)
+    error_signal = pyqtSignal(str)
+
+    def __init__(self, account, recipient, proxy=None):
+        super().__init__()
+        self.account = account
+        self.recipient = recipient
+        self.proxy = proxy
+
+    def run(self):
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(self._load())
+
+    async def _load(self):
+        try:
+            client = build_client(self.account, self.proxy)
+            await client.connect()
+            if not await client.is_user_authorized():
+                self.error_signal.emit("Аккаунт не авторизован")
+                await client.disconnect()
+                return
+            msgs = []
+            async for msg in client.iter_messages(self.recipient, limit=50):
+                if msg.message:
+                    sender = "Я" if msg.out else self.recipient
+                    ts = msg.date.strftime("%d.%m %H:%M")
+                    msgs.append({"sender": sender, "text": msg.message, "ts": ts, "out": msg.out})
+            msgs.reverse()
+            await client.disconnect()
+            self.messages_loaded.emit(self.recipient, msgs)
+        except Exception as ex:
+            self.error_signal.emit(str(ex))
+
+
+class StatCard(QFrame):
+    def __init__(self, label, value="0", parent=None):
+        super().__init__(parent)
+        self.setObjectName("card")
+        self.setMinimumHeight(100)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(20, 16, 20, 16)
+        lay.setSpacing(8)
+        lbl = QLabel(label)
+        lbl.setObjectName("section")
+        lbl.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color: #6b82c0; letter-spacing: 1.8px;")
+        lay.addWidget(lbl)
+        self._val = QLabel(value)
+        self._val.setStyleSheet("background: transparent; font-size: 32px; font-weight: 700; color: #c8d8f0; letter-spacing: -1px;")
+        lay.addWidget(self._val)
+        lay.addStretch()
+
+    def set_value(self, v):
+        self._val.setText(str(v))
+        self._val.setStyleSheet("background: transparent; font-size: 32px; font-weight: 700; color: #6b9ed4; letter-spacing: -1px;")
+        QTimer.singleShot(300, lambda: self._val.setStyleSheet(
+            "background: transparent; font-size: 32px; font-weight: 700; color: #c8d8f0; letter-spacing: -1px;"))
+
+
+class ProxyStatusDot(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(10, 10)
+        self._color = QColor("#3a4a68")
+
+    def set_status(self, status):
+        colors = {"ok": "#6a9e80", "err": "#b06070", "checking": "#a08858"}
+        self._color = QColor(colors.get(status, "#3a4a68"))
+        self.update()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        p.setBrush(self._color)
+        p.drawEllipse(self.rect())
+        p.end()
+
+
+class ProxyRowWidget(QWidget):
+    def __init__(self, proxy_data, idx, parent=None):
+        super().__init__(parent)
+        self.proxy_data = proxy_data
+        self.idx = idx
+        self.setStyleSheet("background: transparent;")
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(8, 6, 8, 6)
+        lay.setSpacing(10)
+
+        self._dot = ProxyStatusDot()
+        lay.addWidget(self._dot)
+
+        type_lbl = QLabel(proxy_data.get("type", "socks5").upper())
+        type_lbl.setStyleSheet("color: #6b82c0; font-size: 11px; font-weight: 700; background: transparent; min-width: 50px;")
+        lay.addWidget(type_lbl)
+
+        host_lbl = QLabel(f"{proxy_data['host']}:{proxy_data['port']}")
+        host_lbl.setStyleSheet("color: #a8b8d8; background: transparent;")
+        lay.addWidget(host_lbl)
+
+        if proxy_data.get("user"):
+            user_lbl = QLabel(proxy_data["user"])
+            user_lbl.setStyleSheet("color: #4e5a78; font-size: 11px; background: transparent;")
+            lay.addWidget(user_lbl)
+
+        lay.addStretch()
+
+        self._status_lbl = QLabel("")
+        self._status_lbl.setStyleSheet("font-size: 11px; background: transparent; min-width: 40px;")
+        lay.addWidget(self._status_lbl)
+
+        self._active_lbl = QLabel("")
+        self._active_lbl.setStyleSheet("color: #4a6fa5; font-size: 11px; font-weight: 700; background: transparent; min-width: 50px;")
+        lay.addWidget(self._active_lbl)
+
+    def set_status(self, status, info=""):
+        self._dot.set_status(status)
+        if status == "ok":
+            self._status_lbl.setText("OK")
+            self._status_lbl.setStyleSheet("color: #6a9e80; font-size: 11px; background: transparent; min-width: 40px;")
+        elif status == "err":
+            self._status_lbl.setText("ERR")
+            self._status_lbl.setStyleSheet("color: #b06070; font-size: 11px; background: transparent; min-width: 40px;")
+        elif status == "checking":
+            self._status_lbl.setText("...")
+            self._status_lbl.setStyleSheet("color: #a08858; font-size: 11px; background: transparent; min-width: 40px;")
+        else:
+            self._status_lbl.setText("")
+
+    def set_active(self, active):
+        self._active_lbl.setText("АКТИВНЫЕ" if active else "")
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Lagos Sender")
+        self.setMinimumSize(1160, 720)
+        self.setStyleSheet(STYLE)
+        self.data = load_data()
+        self._workers = {}
+        self._worker_threads = {}
+        self._ok_count = 0
+        self._err_count = 0
+        self._paused = False
+        self._total_messages = 0
+        self._done_messages = 0
+        self._proxy_check_worker = None
+        self._proxy_status = {}
+        self._proxy_row_widgets = []
+        self._failed_recipients = []
+        self._failed_entries = []
+        self._worker_cards = []
+        self._build_ui()
+        self._refresh_accounts()
+        self._refresh_recipients()
+        self._refresh_pastes()
+        self._refresh_proxies()
+
+    def _build_ui(self):
+        central = QWidget()
+        self.setCentralWidget(central)
+        root = QHBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        sidebar = QFrame()
+        sidebar.setFixedWidth(210)
+        sidebar.setStyleSheet("background: #141720; border: none;")
+        sb_lay = QVBoxLayout(sidebar)
+        sb_lay.setContentsMargins(12, 24, 12, 20)
+        sb_lay.setSpacing(3)
+
+        logo_lbl = QLabel("Lagos Sender")
+        logo_lbl.setStyleSheet("font-size: 15px; font-weight: 700; color: #8898c8; letter-spacing: 0.5px; background: transparent; border: none;")
+        logo_lbl.setAlignment(Qt.AlignCenter)
+        sb_lay.addWidget(logo_lbl)
+        sb_lay.addSpacing(20)
+
+        self._tabs_btns = []
+        tabs = [
+            ("Аккаунты", 0),
+            ("Теги", 1),
+            ("Пасты", 2),
+            ("Спам", 3),
+            ("Логи", 4),
+            ("Прокси", 5),
+            ("Чаты", 6),
+        ]
+        for name, idx in tabs:
+            btn = SidebarButton(name)
+            btn.clicked.connect(lambda checked, i=idx: self._switch_tab(i))
+            sb_lay.addWidget(btn)
+            self._tabs_btns.append(btn)
+
+        sb_lay.addStretch()
+        ver_lbl = QLabel(f"v{APP_VERSION}")
+        ver_lbl.setStyleSheet("color: #2e3a52; font-size: 11px; background: transparent; border: none;")
+        ver_lbl.setAlignment(Qt.AlignCenter)
+        sb_lay.addWidget(ver_lbl)
+        root.addWidget(sidebar)
+
+        sidebar_sep = QFrame()
+        sidebar_sep.setFixedWidth(1)
+        sidebar_sep.setStyleSheet("QFrame { background: #1e2334; border: none; }")
+        root.addWidget(sidebar_sep)
+
+        right_wrap = QWidget()
+        right_wrap.setStyleSheet("background: #1a1d26;")
+        right_vlay = QVBoxLayout(right_wrap)
+        right_vlay.setContentsMargins(0, 0, 0, 0)
+        right_vlay.setSpacing(0)
+
+        topbar = QWidget()
+        topbar.setFixedHeight(52)
+        topbar.setStyleSheet("background: #1a1d26; border-bottom: 1px solid #1e2334;")
+        topbar_lay = QHBoxLayout(topbar)
+        topbar_lay.setContentsMargins(24, 10, 24, 10)
+        topbar_lay.addStretch()
+
+        self.progress_bar = AnimatedProgressBar()
+        self.progress_bar.setMinimumWidth(200)
+        self.progress_bar.hide()
+        topbar_lay.addWidget(self.progress_bar)
+        topbar_lay.addSpacing(10)
+
+        self._pause_btn = AnimatedButton("Пауза")
+        self._pause_btn.setFixedHeight(32)
+        self._pause_btn.setMinimumWidth(90)
+        self._pause_btn.hide()
+        self._pause_btn.clicked.connect(self._toggle_pause)
+        topbar_lay.addWidget(self._pause_btn)
+        topbar_lay.addSpacing(8)
+
+        self._run_btn = AnimatedButton("Начать спам")
+        self._run_btn.setFixedHeight(32)
+        self._run_btn.setMinimumWidth(160)
+        self._run_btn.clicked.connect(self._toggle_send)
+        topbar_lay.addWidget(self._run_btn)
+        right_vlay.addWidget(topbar)
+
+        self._stack = QStackedWidget()
+        right_vlay.addWidget(self._stack)
+        root.addWidget(right_wrap)
+
+        self._pages = [
+            self._build_accounts_page(),
+            self._build_recipients_page(),
+            self._build_pastes_page(),
+            self._build_sender_page(),
+            self._build_logs_page(),
+            self._build_proxies_page(),
+            self._build_chats_page(),
+        ]
+        for p in self._pages:
+            self._stack.addWidget(p)
+
+        self._switch_tab(0)
+
+    def _switch_tab(self, idx):
+        for i, btn in enumerate(self._tabs_btns):
+            btn.setChecked(i == idx)
+        self._stack.setCurrentIndex(idx)
+        if idx == 3:
+            self._refresh_sender_page()
+        if idx == 6:
+            self._refresh_chats_accounts()
+
+    def _mk_page(self):
+        w = QWidget()
+        w.setStyleSheet("background: #1a1d26;")
+        return w
+
+    def _build_accounts_page(self):
+        w = self._mk_page()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(36, 36, 36, 36)
+        lay.setSpacing(14)
+
+        hdr = QLabel("Аккаунты")
+        hdr.setObjectName("header")
+        lay.addWidget(hdr)
+
+        sep = QFrame()
+        sep.setObjectName("separator")
+        lay.addWidget(sep)
+
+        self.acc_list = QListWidget()
+        lay.addWidget(self.acc_list)
+
+        btn_row = QHBoxLayout()
+        add_btn = AnimatedButton("Добавить аккаунт")
+        add_btn.clicked.connect(self._add_account)
+        del_btn = AnimatedButton("Удалить")
+        del_btn.clicked.connect(self._del_account)
+        btn_row.addWidget(add_btn)
+        btn_row.addWidget(del_btn)
+        btn_row.addStretch()
+        lay.addLayout(btn_row)
+        return w
+
+    def _refresh_accounts(self):
+        self.acc_list.clear()
+        for acc in self.data["accounts"]:
+            name = acc.get("name", acc["phone"])
+            un = f"@{acc['username']}" if acc.get("username") else ""
+            self.acc_list.addItem(f"  {name}  {un}  {acc['phone']}")
+
+    def _add_account(self):
+        proxy = self._get_active_proxy()
+        dlg = AuthDialog(self, proxy=proxy)
+        if dlg.exec_() == QDialog.Accepted:
+            self.data["accounts"].append(dlg.result_account)
+            save_data(self.data)
+            self._refresh_accounts()
+            self._refresh_sender_page()
+
+    def _del_account(self):
+        row = self.acc_list.currentRow()
+        if row < 0:
+            return
+        self.data["accounts"].pop(row)
+        save_data(self.data)
+        self._refresh_accounts()
+        self._refresh_sender_page()
+
+    def _build_recipients_page(self):
+        w = self._mk_page()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(36, 36, 36, 36)
+        lay.setSpacing(14)
+
+        hdr = QLabel("Теги")
+        hdr.setObjectName("header")
+        lay.addWidget(hdr)
+
+        sub = QLabel("Создавайте отдельные базы для каждого потока спама")
+        sub.setObjectName("subheader")
+        lay.addWidget(sub)
+
+        sep = QFrame()
+        sep.setObjectName("separator")
+        lay.addWidget(sep)
+
+        top_row = QHBoxLayout()
+        top_row.setSpacing(10)
+        lbl_db = QLabel("БАЗА:")
+        lbl_db.setObjectName("section")
+        top_row.addWidget(lbl_db)
+        self.db_combo = QComboBox()
+        self.db_combo.setFixedHeight(34)
+        self.db_combo.setMinimumWidth(200)
+        self.db_combo.currentIndexChanged.connect(self._on_db_changed)
+        top_row.addWidget(self.db_combo)
+        self.db_name_edit = QLineEdit()
+        self.db_name_edit.setPlaceholderText("Название новой базы...")
+        self.db_name_edit.setFixedHeight(34)
+        self.db_name_edit.setMinimumWidth(180)
+        top_row.addWidget(self.db_name_edit)
+        new_db_btn = AnimatedButton("+ Новая база")
+        new_db_btn.setFixedHeight(34)
+        new_db_btn.clicked.connect(self._create_db)
+        top_row.addWidget(new_db_btn)
+        del_db_btn = AnimatedButton("Удалить базу")
+        del_db_btn.setFixedHeight(34)
+        del_db_btn.clicked.connect(self._delete_db)
+        top_row.addWidget(del_db_btn)
+        top_row.addStretch()
+        lay.addLayout(top_row)
+
+        content = QHBoxLayout()
+        content.setSpacing(28)
+
+        left = QVBoxLayout()
+        lbl_s = QLabel("СПИСОК")
+        lbl_s.setObjectName("section")
+        left.addWidget(lbl_s)
+        self.rec_list = QListWidget()
+        self.rec_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        left.addWidget(self.rec_list)
+        self.rec_count = QLabel("0 тегов")
+        self.rec_count.setStyleSheet("color: #4e5a78; font-size: 12px;")
+        left.addWidget(self.rec_count)
+        content.addLayout(left, 2)
+
+        right = QVBoxLayout()
+        right.setSpacing(10)
+
+        lbl_a = QLabel("ДОБАВИТЬ")
+        lbl_a.setObjectName("section")
+        right.addWidget(lbl_a)
+        self.rec_single = QLineEdit()
+        self.rec_single.setPlaceholderText("@username - $TOKEN")
+        right.addWidget(self.rec_single)
+        add_one = AnimatedButton("+ Добавить")
+        add_one.clicked.connect(self._add_recipient_single)
+        right.addWidget(add_one)
+
+        lbl_b = QLabel("СПИСКОМ")
+        lbl_b.setObjectName("section")
+        lbl_b.setContentsMargins(0, 14, 0, 0)
+        right.addWidget(lbl_b)
+        self.rec_bulk = QPlainTextEdit()
+        self.rec_bulk.setPlaceholderText("@user1 - $TOKEN1\n@user2")
+        self.rec_bulk.setMaximumHeight(130)
+        right.addWidget(self.rec_bulk)
+        add_bulk = AnimatedButton("Добавить всех")
+        add_bulk.clicked.connect(self._add_recipients_bulk)
+        right.addWidget(add_bulk)
+
+        right.addSpacing(14)
+        sep2 = QFrame()
+        sep2.setObjectName("separator")
+        right.addWidget(sep2)
+        right.addSpacing(14)
+
+        del_sel_btn = AnimatedButton("Удалить выбранные")
+        del_sel_btn.clicked.connect(self._del_selected_recipients)
+        right.addWidget(del_sel_btn)
+
+        hint = QLabel("Ctrl+Click для выбора нескольких")
+        hint.setStyleSheet("color: #3a4a68; font-size: 11px;")
+        right.addWidget(hint)
+
+        clear_btn = AnimatedButton("Очистить список")
+        clear_btn.clicked.connect(self._clear_recipients)
+        right.addWidget(clear_btn)
+
+        export_btn = AnimatedButton("Копировать список")
+        export_btn.clicked.connect(self._export_recipients)
+        right.addWidget(export_btn)
+
+        right.addStretch()
+        content.addLayout(right, 1)
+        lay.addLayout(content)
+        self._refresh_db_combo()
+        return w
+
+    def _get_current_db_key(self):
+        idx = self.db_combo.currentIndex()
+        if idx <= 0:
+            return None
+        return self.db_combo.currentText()
+
+    def _get_current_recipients(self):
+        key = self._get_current_db_key()
+        if key is None:
+            return self.data["recipients"]
+        return self.data["recipient_dbs"].get(key, [])
+
+    def _set_current_recipients(self, lst):
+        key = self._get_current_db_key()
+        if key is None:
+            self.data["recipients"] = lst
+        else:
+            if "recipient_dbs" not in self.data:
+                self.data["recipient_dbs"] = {}
+            self.data["recipient_dbs"][key] = lst
+
+    def _refresh_db_combo(self):
+        self.db_combo.blockSignals(True)
+        cur = self.db_combo.currentText()
+        self.db_combo.clear()
+        self.db_combo.addItem("База")
+        for name in self.data.get("recipient_dbs", {}):
+            self.db_combo.addItem(name)
+        idx = self.db_combo.findText(cur)
+        self.db_combo.setCurrentIndex(max(0, idx))
+        self.db_combo.blockSignals(False)
+        self._refresh_recipients()
+        self._refresh_all_worker_rec_combos()
+
+    def _on_db_changed(self):
+        self._refresh_recipients()
+
+    def _create_db(self):
+        name = self.db_name_edit.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Ошибка", "Введите название базы")
+            return
+        if "recipient_dbs" not in self.data:
+            self.data["recipient_dbs"] = {}
+        if name in self.data["recipient_dbs"]:
+            QMessageBox.warning(self, "Ошибка", "База с таким именем уже существует")
+            return
+        self.data["recipient_dbs"][name] = []
+        save_data(self.data)
+        self.db_name_edit.clear()
+        self._refresh_db_combo()
+        idx = self.db_combo.findText(name)
+        if idx >= 0:
+            self.db_combo.setCurrentIndex(idx)
+
+    def _delete_db(self):
+        key = self._get_current_db_key()
+        if key is None:
+            QMessageBox.warning(self, "Ошибка", "Общую базу удалить нельзя")
+            return
+        reply = QMessageBox.question(
+            self, "Удалить базу",
+            f"Удалить базу '{key}'?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+        del self.data["recipient_dbs"][key]
+        save_data(self.data)
+        self._refresh_db_combo()
+
+    def _refresh_recipients(self):
+        self.rec_list.clear()
+        recs = self._get_current_recipients()
+        for r in recs:
+            tag = recipient_tag(r)
+            token = recipient_token(r)
+            label = f"  {tag}  {token}" if token else f"  {tag}"
+            self.rec_list.addItem(label)
+        self.rec_count.setText(f"{len(recs)} тегов")
+
+    def _add_recipient_single(self):
+        raw = self.rec_single.text().strip()
+        if not raw:
+            return
+        tag, token = _parse_recipient_line(raw)
+        entry = {"tag": tag, "token": token}
+        recs = self._get_current_recipients()
+        if not any(recipient_tag(r) == tag for r in recs):
+            recs.append(entry)
+            self._set_current_recipients(recs)
+            save_data(self.data)
+            self._refresh_recipients()
+        self.rec_single.clear()
+
+    def _add_recipients_bulk(self):
+        text = self.rec_bulk.toPlainText()
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        added = 0
+        recs = self._get_current_recipients()
+        for line in lines:
+            tag, token = _parse_recipient_line(line)
+            entry = {"tag": tag, "token": token}
+            if not any(recipient_tag(r) == tag for r in recs):
+                recs.append(entry)
+                added += 1
+        self._set_current_recipients(recs)
+        save_data(self.data)
+        self._refresh_recipients()
+        self.rec_bulk.clear()
+        QMessageBox.information(self, "Готово", f"Добавлено {added} тегов")
+
+    def _del_selected_recipients(self):
+        rows = sorted(set(idx.row() for idx in self.rec_list.selectedIndexes()), reverse=True)
+        if not rows:
+            return
+        recs = self._get_current_recipients()
+        for row in rows:
+            recs.pop(row)
+        self._set_current_recipients(recs)
+        save_data(self.data)
+        self._refresh_recipients()
+
+    def _clear_recipients(self):
+        self._set_current_recipients([])
+        save_data(self.data)
+        self._refresh_recipients()
+
+    def _export_recipients(self):
+        recipients = self._get_current_recipients()
+        if not recipients:
+            QMessageBox.information(self, "Экспорт", "Список пуст")
+            return
+        lines = []
+        for r in recipients:
+            tag = recipient_tag(r)
+            token = recipient_token(r)
+            lines.append(f"{tag} - {token}" if token else tag)
+        QApplication.clipboard().setText("\n".join(lines))
+        QMessageBox.information(self, "Экспорт", f"Скопировано {len(lines)} тегов")
+
+    def _build_pastes_page(self):
+        w = self._mk_page()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(36, 36, 36, 36)
+        lay.setSpacing(14)
+
+        hdr = QLabel("Пасты")
+        hdr.setObjectName("header")
+        lay.addWidget(hdr)
+        sub = QLabel("Тексты сообщений отправляются по очереди каждому мамонту")
+        sub.setObjectName("subheader")
+        lay.addWidget(sub)
+
+        sep = QFrame()
+        sep.setObjectName("separator")
+        lay.addWidget(sep)
+
+        content = QHBoxLayout()
+        content.setSpacing(28)
+
+        left = QVBoxLayout()
+        lbl_l = QLabel("ПАСТЫ")
+        lbl_l.setObjectName("section")
+        left.addWidget(lbl_l)
+        self.paste_list = QListWidget()
+        self.paste_list.currentRowChanged.connect(self._load_paste)
+        left.addWidget(self.paste_list)
+        row = QHBoxLayout()
+        add_p = AnimatedButton("+ Новая")
+        add_p.clicked.connect(self._new_paste)
+        del_p = AnimatedButton("Удалить")
+        del_p.clicked.connect(self._del_paste)
+        row.addWidget(add_p)
+        row.addWidget(del_p)
+        left.addLayout(row)
+        content.addLayout(left, 1)
+
+        right = QVBoxLayout()
+        lbl_r = QLabel("ТЕКСТ СООБЩЕНИЯ")
+        lbl_r.setObjectName("section")
+        right.addWidget(lbl_r)
+        self.paste_edit = QTextEdit()
+        self.paste_edit.setPlaceholderText("Введите текст сообщения...")
+        self.paste_edit.textChanged.connect(self._autosave_paste)
+        right.addWidget(self.paste_edit)
+        save_p = AnimatedButton("Сохранить")
+        save_p.clicked.connect(self._save_paste)
+        right.addWidget(save_p)
+        content.addLayout(right, 2)
+        lay.addLayout(content)
+
+        self._paste_autosave_timer = QTimer()
+        self._paste_autosave_timer.setSingleShot(True)
+        self._paste_autosave_timer.timeout.connect(self._save_paste_silent)
+        return w
+
+    def _autosave_paste(self):
+        self._paste_autosave_timer.start(800)
+
+    def _save_paste_silent(self):
+        row = self.paste_list.currentRow()
+        if row < 0 or row >= len(self.data["pastes"]):
+            return
+        self.data["pastes"][row] = self.paste_edit.toPlainText()
+        save_data(self.data)
+        self._refresh_pastes_keep_row(row)
+
+    def _refresh_pastes(self):
+        self.paste_list.clear()
+        for i, p in enumerate(self.data["pastes"]):
+            preview = p[:48].replace("\n", " ")
+            self.paste_list.addItem(f"  {i+1}.  {preview}")
+
+    def _refresh_pastes_keep_row(self, row):
+        self.paste_list.blockSignals(True)
+        self.paste_list.clear()
+        for i, p in enumerate(self.data["pastes"]):
+            preview = p[:48].replace("\n", " ")
+            self.paste_list.addItem(f"  {i+1}.  {preview}")
+        self.paste_list.blockSignals(False)
+        if row < self.paste_list.count():
+            self.paste_list.setCurrentRow(row)
+
+    def _load_paste(self, row):
+        if 0 <= row < len(self.data["pastes"]):
+            self.paste_edit.blockSignals(True)
+            self.paste_edit.setPlainText(self.data["pastes"][row])
+            self.paste_edit.blockSignals(False)
+
+    def _new_paste(self):
+        self.data["pastes"].append("")
+        save_data(self.data)
+        self._refresh_pastes()
+        self.paste_list.setCurrentRow(len(self.data["pastes"]) - 1)
+        self.paste_edit.setFocus()
+
+    def _save_paste(self):
+        row = self.paste_list.currentRow()
+        if row < 0:
+            return
+        self.data["pastes"][row] = self.paste_edit.toPlainText()
+        save_data(self.data)
+        self._refresh_pastes_keep_row(row)
+
+    def _del_paste(self):
+        row = self.paste_list.currentRow()
+        if row < 0:
+            return
+        self.data["pastes"].pop(row)
+        save_data(self.data)
+        self._refresh_pastes()
+
+    def _build_proxies_page(self):
+        w = self._mk_page()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(36, 36, 36, 36)
+        lay.setSpacing(14)
+
+        hdr = QLabel("Прокси")
+        hdr.setObjectName("header")
+        lay.addWidget(hdr)
+        sub = QLabel("Управление прокси серверами")
+        sub.setObjectName("subheader")
+        lay.addWidget(sub)
+
+        sep = QFrame()
+        sep.setObjectName("separator")
+        lay.addWidget(sep)
+
+        content = QHBoxLayout()
+        content.setSpacing(28)
+
+        left = QVBoxLayout()
+        lbl_list = QLabel("ПРОКСИ ПУЛ")
+        lbl_list.setObjectName("section")
+        left.addWidget(lbl_list)
+
+        self.proxy_list = QListWidget()
+        self.proxy_list.setSpacing(2)
+        left.addWidget(self.proxy_list)
+
+        proxy_btn_row = QHBoxLayout()
+        set_active_btn = AnimatedButton("Использовать")
+        set_active_btn.clicked.connect(self._set_active_proxy)
+        check_btn = AnimatedButton("Проверить все")
+        check_btn.clicked.connect(self._check_all_proxies)
+        del_proxy_btn = AnimatedButton("Удалить")
+        del_proxy_btn.clicked.connect(self._del_proxy)
+        proxy_btn_row.addWidget(set_active_btn)
+        proxy_btn_row.addWidget(check_btn)
+        proxy_btn_row.addWidget(del_proxy_btn)
+        left.addLayout(proxy_btn_row)
+
+        self.active_proxy_lbl = QLabel("Активные прокси: нет")
+        self.active_proxy_lbl.setStyleSheet("color: #4e5a78; font-size: 12px;")
+        left.addWidget(self.active_proxy_lbl)
+        content.addLayout(left, 2)
+
+        right = QVBoxLayout()
+        right.setSpacing(10)
+
+        lbl_add = QLabel("ДОБАВИТЬ ПРОКСИ")
+        lbl_add.setObjectName("section")
+        right.addWidget(lbl_add)
+
+        lbl_type = QLabel("ТИП")
+        lbl_type.setObjectName("section")
+        right.addWidget(lbl_type)
+        self.proxy_type = QComboBox()
+        self.proxy_type.addItems(["socks5", "socks4", "http"])
+        self.proxy_type.setFixedHeight(38)
+        right.addWidget(self.proxy_type)
+
+        for lbl_text, attr, ph in [
+            ("ХОСТ", "proxy_host", "127.0.0.1"),
+            ("ПОРТ", "proxy_port", "1080"),
+            ("ЛОГИН (необязательно)", "proxy_user", "username"),
+        ]:
+            lbl = QLabel(lbl_text)
+            lbl.setObjectName("section")
+            right.addWidget(lbl)
+            edit = QLineEdit()
+            edit.setPlaceholderText(ph)
+            setattr(self, attr, edit)
+            right.addWidget(edit)
+
+        lbl_pass = QLabel("ПАРОЛЬ (необязательно)")
+        lbl_pass.setObjectName("section")
+        right.addWidget(lbl_pass)
+        self.proxy_pass = QLineEdit()
+        self.proxy_pass.setPlaceholderText("пароль")
+        self.proxy_pass.setEchoMode(QLineEdit.Password)
+        right.addWidget(self.proxy_pass)
+
+        add_proxy_btn = AnimatedButton("+ Добавить")
+        add_proxy_btn.clicked.connect(self._add_proxy)
+        right.addWidget(add_proxy_btn)
+
+
+
+        right.addStretch()
+        content.addLayout(right, 1)
+        lay.addLayout(content)
+        return w
+
+    def _refresh_proxies(self):
+        self.proxy_list.clear()
+        self._proxy_row_widgets = []
+        active_idx = self.data.get("active_proxy_idx", -1)
+        for i, p in enumerate(self.data.get("proxies", [])):
+            item = QListWidgetItem(self.proxy_list)
+            row_widget = ProxyRowWidget(p, i)
+            status = self._proxy_status.get(i, "")
+            if status:
+                row_widget.set_status(status)
+            row_widget.set_active(i == active_idx)
+            item.setSizeHint(row_widget.sizeHint())
+            self.proxy_list.addItem(item)
+            self.proxy_list.setItemWidget(item, row_widget)
+            self._proxy_row_widgets.append(row_widget)
+        self._update_active_proxy_label()
+
+    def _update_active_proxy_label(self):
+        idx = self.data.get("active_proxy_idx", -1)
+        proxies = self.data.get("proxies", [])
+        if 0 <= idx < len(proxies):
+            p = proxies[idx]
+            self.active_proxy_lbl.setText(f"Активные: {p['type'].upper()} {p['host']}:{p['port']}")
+        else:
+            self.active_proxy_lbl.setText("Активные прокси: нет")
+
+    def _add_proxy(self):
+        host = self.proxy_host.text().strip()
+        port = self.proxy_port.text().strip()
+        if not host or not port:
+            QMessageBox.warning(self, "Ошибка", "Укажите хост и порт")
+            return
+        try:
+            int(port)
+        except ValueError:
+            QMessageBox.warning(self, "Ошибка", "Порт должен быть числом")
+            return
+        proxy = {
+            "type": self.proxy_type.currentText(),
+            "host": host,
+            "port": int(port),
+            "user": self.proxy_user.text().strip(),
+            "password": self.proxy_pass.text().strip(),
+        }
+        if "proxies" not in self.data:
+            self.data["proxies"] = []
+        self.data["proxies"].append(proxy)
+        save_data(self.data)
+        self._refresh_proxies()
+        self.proxy_host.clear()
+        self.proxy_port.clear()
+        self.proxy_user.clear()
+        self.proxy_pass.clear()
+
+    def _import_proxies_bulk(self):
+        text = self.proxy_bulk.toPlainText().strip()
+        if not text:
+            return
+        added = 0
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(":")
+            if len(parts) >= 3:
+                ptype = parts[0].lower() if parts[0].lower() in ("socks5", "socks4", "http") else "socks5"
+                host = parts[1]
+                try:
+                    port = int(parts[2])
+                except ValueError:
+                    continue
+                user = parts[3] if len(parts) > 3 else ""
+                password = parts[4] if len(parts) > 4 else ""
+                self.data["proxies"].append({"type": ptype, "host": host, "port": port, "user": user, "password": password})
+                added += 1
+        save_data(self.data)
+        self._refresh_proxies()
+        self.proxy_bulk.clear()
+        QMessageBox.information(self, "Импорт", f"Добавлено {added} прокси")
+
+    def _del_proxy(self):
+        row = self.proxy_list.currentRow()
+        if row < 0:
+            return
+        self.data["proxies"].pop(row)
+        if self.data.get("active_proxy_idx", -1) == row:
+            self.data["active_proxy_idx"] = -1
+        if row in self._proxy_status:
+            del self._proxy_status[row]
+        save_data(self.data)
+        self._refresh_proxies()
+
+    def _set_active_proxy(self):
+        row = self.proxy_list.currentRow()
+        if row < 0:
+            return
+        self.data["active_proxy_idx"] = row
+        save_data(self.data)
+        self._refresh_proxies()
+
+    def _get_active_proxy(self):
+        idx = self.data.get("active_proxy_idx", -1)
+        proxies = self.data.get("proxies", [])
+        if 0 <= idx < len(proxies):
+            return proxies[idx]
+        return None
+
+    def _check_all_proxies(self):
+        proxies = self.data.get("proxies", [])
+        if not proxies:
+            QMessageBox.information(self, "Проверка", "Нет прокси для проверки")
+            return
+        for i in range(len(proxies)):
+            self._proxy_status[i] = "checking"
+            if i < len(self._proxy_row_widgets):
+                self._proxy_row_widgets[i].set_status("checking")
+        self._proxy_check_worker = ProxyCheckerWorker(proxies)
+        self._proxy_check_worker.result_signal.connect(self._on_proxy_check_result)
+        self._proxy_check_worker.finished_signal.connect(self._on_proxy_check_done)
+        t = threading.Thread(target=self._proxy_check_worker.run, daemon=True)
+        t.start()
+
+    def _on_proxy_check_result(self, idx, ok, info):
+        self._proxy_status[idx] = "ok" if ok else "err"
+        if idx < len(self._proxy_row_widgets):
+            self._proxy_row_widgets[idx].set_status("ok" if ok else "err", info)
+
+    def _on_proxy_check_done(self):
+        self._proxy_check_worker = None
+
+    def _build_chats_page(self):
+        w = self._mk_page()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(36, 36, 36, 36)
+        lay.setSpacing(14)
+
+        hdr = QLabel("Чаты")
+        hdr.setObjectName("header")
+        lay.addWidget(hdr)
+        sub = QLabel("Переписка с мамонтами")
+        sub.setObjectName("subheader")
+        lay.addWidget(sub)
+
+        sep = QFrame()
+        sep.setObjectName("separator")
+        lay.addWidget(sep)
+
+        top_row = QHBoxLayout()
+        top_row.setSpacing(16)
+        lbl_acc = QLabel("АККАУНТ")
+        lbl_acc.setObjectName("section")
+        top_row.addWidget(lbl_acc)
+        self.chat_acc_combo = QComboBox()
+        self.chat_acc_combo.setMinimumWidth(260)
+        self.chat_acc_combo.setFixedHeight(38)
+        top_row.addWidget(self.chat_acc_combo)
+        load_btn = AnimatedButton("Загрузить список")
+        load_btn.clicked.connect(self._load_chat_contacts)
+        top_row.addWidget(load_btn)
+        top_row.addStretch()
+        lay.addLayout(top_row)
+
+        content = QHBoxLayout()
+        content.setSpacing(16)
+
+        contacts_col = QVBoxLayout()
+        lbl_contacts = QLabel("ТЕГИ")
+        lbl_contacts.setObjectName("section")
+        contacts_col.addWidget(lbl_contacts)
+        self.chat_contacts_list = QListWidget()
+        self.chat_contacts_list.currentRowChanged.connect(self._open_chat)
+        contacts_col.addWidget(self.chat_contacts_list)
+        self.chat_status_lbl = QLabel("")
+        self.chat_status_lbl.setStyleSheet("color: #4e5a78; font-size: 11px;")
+        contacts_col.addWidget(self.chat_status_lbl)
+        content.addLayout(contacts_col, 1)
+
+        chat_col = QVBoxLayout()
+        lbl_chat = QLabel("ПЕРЕПИСКА")
+        lbl_chat.setObjectName("section")
+        chat_col.addWidget(lbl_chat)
+        self.chat_view = QTextEdit()
+        self.chat_view.setReadOnly(True)
+        self.chat_view.setStyleSheet("""
+            QTextEdit {
+                background: #13161f;
+                border: 1px solid #232840;
+                border-radius: 10px;
+                padding: 12px 14px;
+                font-size: 13px;
+                color: #dde3f0;
+            }
+        """)
+        chat_col.addWidget(self.chat_view)
+        content.addLayout(chat_col, 2)
+        lay.addLayout(content)
+        return w
+
+    def _refresh_chats_accounts(self):
+        self.chat_acc_combo.clear()
+        for acc in self.data["accounts"]:
+            name = acc.get("name", acc["phone"])
+            self.chat_acc_combo.addItem(f"{name}  {acc['phone']}")
+
+    def _load_chat_contacts(self):
+        acc_idx = self.chat_acc_combo.currentIndex()
+        if acc_idx < 0 or acc_idx >= len(self.data["accounts"]):
+            QMessageBox.warning(self, "Ошибка", "Выберите аккаунт")
+            return
+        recipients = self.data.get("recipients", [])
+        if not recipients:
+            QMessageBox.warning(self, "Ошибка", "Нет тегов")
+            return
+        self.chat_contacts_list.clear()
+        self.chat_view.clear()
+        self.chat_status_lbl.setText("Загружено")
+        chat_log = self.data.get("chat_log", {})
+        for r in recipients:
+            tag = recipient_tag(r)
+            replied = chat_log.get(tag, {}).get("replied", False)
+            suffix = "  [ответил]" if replied else ""
+            self.chat_contacts_list.addItem(f"  {tag}{suffix}")
+
+    def _open_chat(self, row):
+        if row < 0:
+            return
+        acc_idx = self.chat_acc_combo.currentIndex()
+        if acc_idx < 0 or acc_idx >= len(self.data["accounts"]):
+            return
+        acc = self.data["accounts"][acc_idx]
+        recipients = self.data.get("recipients", [])
+        if row >= len(recipients):
+            return
+        tag = recipient_tag(recipients[row])
+        self.chat_view.setPlainText("Загружаем...")
+        proxy = self._get_active_proxy()
+        loader = ChatLoader(acc, tag, proxy=proxy)
+        loader.messages_loaded.connect(self._on_chat_loaded)
+        loader.error_signal.connect(self._on_chat_error)
+        t = threading.Thread(target=loader.run, daemon=True)
+        t.start()
+        self._current_chat_loader = loader
+
+    def _on_chat_loaded(self, tag, messages):
+        self.chat_view.clear()
+        if not messages:
+            self.chat_view.setPlainText("Нет сообщений")
+            return
+        replied = any(not m["out"] for m in messages)
+        chat_log = self.data.get("chat_log", {})
+        if tag not in chat_log:
+            chat_log[tag] = {}
+        chat_log[tag]["replied"] = replied
+        self.data["chat_log"] = chat_log
+        save_data(self.data)
+        html_parts = []
+        for m in messages:
+            if m["out"]:
+                color = "#4a6fa5"
+                align = "right"
+                prefix = "Я"
+            else:
+                color = "#6a9e80"
+                align = "left"
+                prefix = tag
+            text = m["text"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            html_parts.append(
+                f'<div style="text-align:{align}; margin:6px 0;">'
+                f'<span style="color:#3a4a68; font-size:11px;">{prefix} {m["ts"]}</span><br>'
+                f'<span style="color:{color};">{text}</span></div>'
+            )
+        self.chat_view.setHtml("".join(html_parts))
+        self._refresh_chat_contacts_replied()
+
+    def _on_chat_error(self, err):
+        self.chat_view.setPlainText(f"Ошибка: {err}")
+
+    def _refresh_chat_contacts_replied(self):
+        chat_log = self.data.get("chat_log", {})
+        recipients = self.data.get("recipients", [])
+        self.chat_contacts_list.blockSignals(True)
+        current = self.chat_contacts_list.currentRow()
+        self.chat_contacts_list.clear()
+        for r in recipients:
+            tag = recipient_tag(r)
+            replied = chat_log.get(tag, {}).get("replied", False)
+            suffix = "  [ответил]" if replied else ""
+            self.chat_contacts_list.addItem(f"  {tag}{suffix}")
+        if 0 <= current < self.chat_contacts_list.count():
+            self.chat_contacts_list.setCurrentRow(current)
+        self.chat_contacts_list.blockSignals(False)
+
+    def _build_sender_page(self):
+        w = self._mk_page()
+        outer = QVBoxLayout(w)
+        outer.setContentsMargins(36, 36, 36, 0)
+        outer.setSpacing(0)
+
+        hdr = QLabel("Спам")
+        hdr.setObjectName("header")
+        outer.addWidget(hdr)
+        outer.addSpacing(12)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background: transparent;")
+        lay = QVBoxLayout(scroll_content)
+        lay.setContentsMargins(0, 0, 12, 24)
+        lay.setSpacing(16)
+
+        self._worker_cards_widget = QWidget()
+        self._worker_cards_widget.setStyleSheet("background: transparent;")
+        self._worker_cards_layout = QVBoxLayout(self._worker_cards_widget)
+        self._worker_cards_layout.setContentsMargins(0, 0, 0, 0)
+        self._worker_cards_layout.setSpacing(12)
+        lay.addWidget(self._worker_cards_widget)
+
+        add_worker_btn = AnimatedButton("+ Добавить поток")
+        add_worker_btn.setFixedWidth(200)
+        add_worker_btn.clicked.connect(self._add_worker_card)
+        lay.addWidget(add_worker_btn)
+        lay.addSpacing(8)
+
+        sep_s = QFrame()
+        sep_s.setObjectName("separator")
+        lay.addWidget(sep_s)
+        lay.addSpacing(8)
+
+        glob_card = QFrame()
+        glob_card.setObjectName("card")
+        glob_lay = QHBoxLayout(glob_card)
+        glob_lay.setContentsMargins(20, 16, 20, 16)
+        glob_lay.setSpacing(32)
+
+        interval_col = QVBoxLayout()
+        lbl_int = QLabel("ИНТЕРВАЛ СООБЩЕНИЙ (МИН)")
+        lbl_int.setObjectName("section")
+        interval_col.addWidget(lbl_int)
+        interval_col.addSpacing(6)
+        self.interval_spin = StyledSpinBox()
+        self.interval_spin.setRange(0, 60)
+        self.interval_spin.setValue(2)
+        self.interval_spin.setSuffix(" мин")
+        self.interval_spin.valueChanged.connect(self._update_eta)
+        self.interval_spin.setFixedWidth(160)
+        interval_col.addWidget(self.interval_spin)
+        glob_lay.addLayout(interval_col)
+
+        tag_interval_col = QVBoxLayout()
+        lbl_tag_int = QLabel("ИНТЕРВАЛ МЕЖДУ ТЕГАМИ (МИН)")
+        lbl_tag_int.setObjectName("section")
+        tag_interval_col.addWidget(lbl_tag_int)
+        tag_interval_col.addSpacing(6)
+        self.tag_interval_spin = StyledSpinBox()
+        self.tag_interval_spin.setRange(0, 1440)
+        self.tag_interval_spin.setValue(self.data.get("tag_interval_min", 0))
+        self.tag_interval_spin.setSuffix(" мин")
+        self.tag_interval_spin.setFixedWidth(160)
+        hint_tag = QLabel("0 = без интервала")
+        hint_tag.setStyleSheet("color: #3a4a68; font-size: 11px; background: transparent;")
+        tag_interval_col.addWidget(self.tag_interval_spin)
+        tag_interval_col.addWidget(hint_tag)
+        glob_lay.addLayout(tag_interval_col)
+
+        time_col = QVBoxLayout()
+        lbl_time = QLabel("ВРЕМЯ СТАРТА")
+        lbl_time.setObjectName("section")
+        time_col.addWidget(lbl_time)
+        time_col.addSpacing(6)
+        self.start_time_edit = StyledTimeEdit()
+        self.start_time_edit.setTime(QTime.currentTime())
+        self.start_time_edit.setFixedWidth(160)
+        time_col.addWidget(self.start_time_edit)
+        glob_lay.addLayout(time_col)
+
+        eta_col = QVBoxLayout()
+        self.eta_lbl = QLabel("")
+        self.eta_lbl.setStyleSheet("color: #4a5878; font-size: 12px; background: transparent;")
+        self.eta_lbl.setWordWrap(True)
+        eta_col.addStretch()
+        eta_col.addWidget(self.eta_lbl)
+        glob_lay.addLayout(eta_col)
+        glob_lay.addStretch()
+        lay.addWidget(glob_card)
+
+        stats_outer = QFrame()
+        stats_outer.setObjectName("card")
+        stats_grid = QGridLayout(stats_outer)
+        stats_grid.setContentsMargins(16, 16, 16, 16)
+        stats_grid.setSpacing(12)
+        for i in range(4):
+            stats_grid.setColumnStretch(i, 1)
+        self.stat_total = StatCard("ВСЕГО")
+        self.stat_ok = StatCard("ОТПРАВЛЕНО")
+        self.stat_err = StatCard("ОШИБОК")
+        self.stat_left = StatCard("ОСТАЛОСЬ")
+        stats_grid.addWidget(self.stat_total, 0, 0)
+        stats_grid.addWidget(self.stat_ok, 0, 1)
+        stats_grid.addWidget(self.stat_err, 0, 2)
+        stats_grid.addWidget(self.stat_left, 0, 3)
+        lay.addWidget(stats_outer)
+
+        log_card = QFrame()
+        log_card.setObjectName("card")
+        log_card_lay = QVBoxLayout(log_card)
+        log_card_lay.setContentsMargins(16, 14, 16, 14)
+        log_card_lay.setSpacing(8)
+        lbl_log = QLabel("СТАТУС")
+        lbl_log.setObjectName("section")
+        log_card_lay.addWidget(lbl_log)
+        self.log_view = QTextEdit()
+        self.log_view.setReadOnly(True)
+        self.log_view.setFixedHeight(220)
+        self.log_view.setStyleSheet("""
+            QTextEdit {
+                background: #13161f;
+                border: 1px solid #232840;
+                border-radius: 8px;
+                padding: 10px 12px;
+                font-size: 12px;
+                color: #dde3f0;
+            }
+        """)
+        log_card_lay.addWidget(self.log_view)
+        lay.addWidget(log_card)
+
+        scroll.setWidget(scroll_content)
+        outer.addWidget(scroll)
+        return w
+
+    def _add_worker_card(self):
+        card_idx = len(self._worker_cards)
+        self._build_worker_card(card_idx)
+        self._update_eta()
+
+    def _build_worker_card(self, idx):
+        card = QFrame()
+        card.setObjectName("card")
+        card_lay = QVBoxLayout(card)
+        card_lay.setContentsMargins(20, 16, 20, 16)
+        card_lay.setSpacing(10)
+
+        title_row = QHBoxLayout()
+        title_lbl = QLabel(f"ПОТОК {idx + 1}")
+        title_lbl.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color: #6b82c0; letter-spacing: 1.8px;")
+        title_row.addWidget(title_lbl)
+        title_row.addStretch()
+        if idx > 0:
+            rm_btn = AnimatedButton("Удалить")
+            rm_btn.setFixedHeight(28)
+            rm_btn.setFixedWidth(90)
+            rm_btn.clicked.connect(lambda checked, i=idx: self._remove_worker_card(i))
+            title_row.addWidget(rm_btn)
+        card_lay.addLayout(title_row)
+
+        row = QHBoxLayout()
+        row.setSpacing(20)
+
+        acc_col = QVBoxLayout()
+        lbl_a = QLabel("АККАУНТ")
+        lbl_a.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color: #6b82c0; letter-spacing: 1.8px;")
+        acc_col.addWidget(lbl_a)
+        acc_combo = QComboBox()
+        acc_combo.setFixedHeight(38)
+        acc_combo.setMinimumWidth(220)
+        for acc in self.data["accounts"]:
+            name = acc.get("name", acc["phone"])
+            un = f"@{acc['username']}" if acc.get("username") else ""
+            acc_combo.addItem(f"{name}  {un}  {acc['phone']}")
+        acc_col.addWidget(acc_combo)
+        row.addLayout(acc_col)
+
+        proxy_col = QVBoxLayout()
+        lbl_p = QLabel("ПРОКСИ")
+        lbl_p.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color: #6b82c0; letter-spacing: 1.8px;")
+        proxy_col.addWidget(lbl_p)
+        proxy_combo = QComboBox()
+        proxy_combo.setFixedHeight(38)
+        proxy_combo.setMinimumWidth(220)
+        proxy_combo.addItem("Без прокси")
+        for p in self.data.get("proxies", []):
+            proxy_combo.addItem(f"{p['type'].upper()}  {p['host']}:{p['port']}")
+        proxy_col.addWidget(proxy_combo)
+        row.addLayout(proxy_col)
+
+        rec_col = QVBoxLayout()
+        lbl_r = QLabel("ТЕГИ (БАЗА)")
+        lbl_r.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color: #6b82c0; letter-spacing: 1.8px;")
+        rec_col.addWidget(lbl_r)
+        rec_combo = QComboBox()
+        rec_combo.setFixedHeight(38)
+        rec_combo.setMinimumWidth(200)
+        rec_combo.addItem("База")
+        for key in self.data.get("recipient_dbs", {}):
+            rec_combo.addItem(key)
+        rec_col.addWidget(rec_combo)
+        row.addLayout(rec_col)
+
+        pastes_col = QVBoxLayout()
+        lbl_ps = QLabel("ПАСТЫ")
+        lbl_ps.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color: #6b82c0; letter-spacing: 1.8px;")
+        pastes_col.addWidget(lbl_ps)
+        paste_list_w = QListWidget()
+        paste_list_w.setSelectionMode(QAbstractItemView.NoSelection)
+        paste_list_w.setMaximumHeight(90)
+        paste_list_w.setMinimumWidth(220)
+        paste_list_w.setStyleSheet("""
+            QListWidget {
+                background: #141720;
+                border: 1px solid #2c3348;
+                border-radius: 8px;
+                outline: none;
+                padding: 4px;
+            }
+            QListWidget::item {
+                border-radius: 6px;
+                padding: 5px 10px;
+                margin: 1px 2px;
+                color: #a8b8d8;
+            }
+            QListWidget::item:hover { background: #202535; }
+        """)
+        for i, p in enumerate(self.data["pastes"]):
+            if not p.strip():
+                continue
+            preview = p[:40].replace("\n", " ")
+            item = QListWidgetItem(f"  {i+1}.  {preview}")
+            item.setData(Qt.UserRole, i)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked)
+            paste_list_w.addItem(item)
+        paste_list_w.itemClicked.connect(lambda it: it.setCheckState(
+            Qt.Unchecked if it.checkState() == Qt.Checked else Qt.Checked
+        ))
+        pastes_col.addWidget(paste_list_w)
+        row.addLayout(pastes_col)
+        row.addStretch()
+        card_lay.addLayout(row)
+
+
+
+        start_btn = AnimatedButton(f"Запустить поток {idx + 1}")
+        start_btn.setMinimumHeight(36)
+        start_btn.setFixedWidth(220)
+        start_btn.clicked.connect(lambda checked, i=idx: self._toggle_worker(i))
+        card_lay.addWidget(start_btn)
+
+        self._worker_cards_layout.addWidget(card)
+        self._worker_cards.append({
+            "card": card,
+            "acc_combo": acc_combo,
+            "proxy_combo": proxy_combo,
+            "paste_list": paste_list_w,
+            "rec_combo": rec_combo,
+            "start_btn": start_btn,
+            "recipients": None,
+        })
+
+    def _refresh_all_worker_rec_combos(self):
+        for card_data in self._worker_cards:
+            combo = card_data["rec_combo"]
+            cur = combo.currentText()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem("База")
+            for key in self.data.get("recipient_dbs", {}):
+                combo.addItem(key)
+            idx2 = combo.findText(cur)
+            combo.setCurrentIndex(max(0, idx2))
+            combo.blockSignals(False)
+
+    def _remove_worker_card(self, idx):
+        if idx >= len(self._worker_cards):
+            return
+        if idx in self._workers:
+            self._workers[idx].stop()
+        card_data = self._worker_cards[idx]
+        card_data["card"].setParent(None)
+        card_data["card"].deleteLater()
+        self._worker_cards.pop(idx)
+
+    def _get_worker_selected_pastes(self, idx):
+        if idx >= len(self._worker_cards):
+            return []
+        paste_list_w = self._worker_cards[idx]["paste_list"]
+        selected = []
+        for i in range(paste_list_w.count()):
+            item = paste_list_w.item(i)
+            if item.checkState() == Qt.Checked:
+                data_idx = item.data(Qt.UserRole)
+                if 0 <= data_idx < len(self.data["pastes"]):
+                    selected.append(self.data["pastes"][data_idx])
+        return selected
+
+    def _toggle_worker(self, idx):
+        if idx in self._workers and self._workers[idx] is not None:
+            self._stop_worker(idx)
+        else:
+            self._start_worker(idx)
+
+    def _start_worker(self, idx):
+        if idx >= len(self._worker_cards):
+            return
+        card_data = self._worker_cards[idx]
+        acc_idx = card_data["acc_combo"].currentIndex()
+        if acc_idx < 0 or acc_idx >= len(self.data["accounts"]):
+            QMessageBox.warning(self, "Ошибка", "Выберите аккаунт")
+            return
+        selected_pastes = self._get_worker_selected_pastes(idx)
+        if not selected_pastes:
+            QMessageBox.warning(self, "Ошибка", "Выберите хотя бы одну пасту")
+            return
+        rec_combo = card_data["rec_combo"]
+        if rec_combo.currentIndex() == 0:
+            recipients = self.data.get("recipients", [])
+        else:
+            key = rec_combo.currentText()
+            recipients = self.data.get("recipient_dbs", {}).get(key, self.data.get("recipients", []))
+        if not recipients:
+            QMessageBox.warning(self, "Ошибка", "Нет тегов")
+            return
+        account = self.data["accounts"][acc_idx]
+        proxy_idx = card_data["proxy_combo"].currentIndex()
+        proxy = None
+        if proxy_idx > 0:
+            actual_idx = proxy_idx - 1
+            proxies = self.data.get("proxies", [])
+            if actual_idx < len(proxies):
+                proxy = proxies[actual_idx]
+
+        interval_min = self.interval_spin.value()
+        tag_interval_min = self.tag_interval_spin.value()
+
+        worker = SenderWorker(
+            account, recipients, selected_pastes,
+            interval_min, len(selected_pastes),
+            proxy=proxy,
+            tag_interval_min=tag_interval_min,
+            worker_id=idx,
+        )
+        worker.log_signal.connect(self._on_log)
+        worker.progress_signal.connect(lambda d, t, i=idx: self._on_worker_progress(i, d, t))
+        worker.finished_signal.connect(lambda i=idx: self._on_worker_finished(i))
+        worker.failed_signal.connect(self._on_failed)
+        worker.failed_detail_signal.connect(self._on_failed_detail)
+
+        self._workers[idx] = worker
+        self._total_messages += len(recipients) * len(selected_pastes)
+        self.stat_total.set_value(self._total_messages)
+        self.stat_left.set_value(self._total_messages - self._done_messages)
+        self.progress_bar.setMaximum(self._total_messages)
+        self.progress_bar.show()
+        self._pause_btn.show()
+
+        t = threading.Thread(target=worker.run, daemon=True)
+        self._worker_threads[idx] = t
+        t.start()
+
+        card_data["start_btn"].setText(f"Остановить поток {idx + 1}")
+        proxy_info = f"  прокси: {proxy['type'].upper()} {proxy['host']}:{proxy['port']}" if proxy else ""
+        self._on_log(
+            f"[W{idx+1}] Запущен  {len(recipients)} тегов  {len(selected_pastes)} past{proxy_info}",
+            "info"
+        )
+
+    def _stop_worker(self, idx):
+        if idx in self._workers and self._workers[idx]:
+            self._workers[idx].stop()
+            self._workers[idx] = None
+        if idx < len(self._worker_cards):
+            self._worker_cards[idx]["start_btn"].setText(f"Запустить поток {idx + 1}")
+        self._on_log(f"[W{idx+1}] Остановлен", "warn")
+
+    def _on_worker_progress(self, worker_idx, done_delta, total_delta):
+        self._done_messages = sum(
+            getattr(w, '_done', 0) for w in self._workers.values() if w
+        )
+        self.progress_bar.setValue(self._done_messages)
+        self._on_progress(self._done_messages, self._total_messages)
+
+    def _on_worker_finished(self, idx):
+        if idx in self._workers:
+            self._workers[idx] = None
+        if idx < len(self._worker_cards):
+            self._worker_cards[idx]["start_btn"].setText(f"Запустить поток {idx + 1}")
+        self._on_log(f"[W{idx+1}] Завершён", "ok")
+        all_done = all(w is None for w in self._workers.values())
+        if all_done:
+            self.progress_bar.hide()
+            self._pause_btn.hide()
+            self._on_finished_all()
+
+    def _on_finished_all(self):
+        if self._failed_recipients:
+            out = Path("failed_recipients.txt")
+            out.write_text("\n".join(self._failed_recipients), encoding="utf-8")
+            self._on_log(f"Неудачных: {len(self._failed_recipients)}, сохранено в failed_recipients.txt", "warn")
+        self._on_log("Все потоки завершены", "ok")
+        self._total_messages = 0
+        self._done_messages = 0
+
+    def _refresh_sender_page(self):
+        if not self._worker_cards:
+            self._build_worker_card(0)
+        else:
+            for card_data in self._worker_cards:
+                old_acc = card_data["acc_combo"].currentIndex()
+                card_data["acc_combo"].clear()
+                for acc in self.data["accounts"]:
+                    name = acc.get("name", acc["phone"])
+                    un = f"@{acc['username']}" if acc.get("username") else ""
+                    card_data["acc_combo"].addItem(f"{name}  {un}  {acc['phone']}")
+                if old_acc < card_data["acc_combo"].count():
+                    card_data["acc_combo"].setCurrentIndex(old_acc)
+                old_proxy = card_data["proxy_combo"].currentIndex()
+                card_data["proxy_combo"].clear()
+                card_data["proxy_combo"].addItem("Без прокси")
+                for p in self.data.get("proxies", []):
+                    card_data["proxy_combo"].addItem(f"{p['type'].upper()}  {p['host']}:{p['port']}")
+                if old_proxy < card_data["proxy_combo"].count():
+                    card_data["proxy_combo"].setCurrentIndex(old_proxy)
+        self._update_eta()
+
+    def _update_eta(self):
+        if not self._worker_cards:
+            self.eta_lbl.setText("")
+            return
+        total = 0
+        for idx, card_data in enumerate(self._worker_cards):
+            pastes = self._get_worker_selected_pastes(idx)
+            rec_combo = card_data["rec_combo"]
+            if rec_combo.currentIndex() == 0:
+                recs = self.data.get("recipients", [])
+            else:
+                key = rec_combo.currentText()
+                recs = self.data.get("recipient_dbs", {}).get(key, self.data.get("recipients", []))
+            total += len(recs) * len(pastes)
+        if total == 0:
+            self.eta_lbl.setText("")
+            return
+        interval_min = self.interval_spin.value()
+        total_min = (total - 1) * interval_min
+        start_qtime = self.start_time_edit.time()
+        start_dt = datetime.now().replace(
+            hour=start_qtime.hour(), minute=start_qtime.minute(),
+            second=0, microsecond=0
+        )
+        end_dt = start_dt + timedelta(minutes=total_min)
+        self.eta_lbl.setText(f"Конец ~{end_dt.strftime('%H:%M')}  {total} сообщений")
+
+    def _toggle_send(self):
+        any_running = any(w is not None for w in self._workers.values())
+        if any_running:
+            for idx in list(self._workers.keys()):
+                self._stop_worker(idx)
+            self._run_btn.setText("Начать спам")
+        else:
+            for idx in range(len(self._worker_cards)):
+                self._start_worker(idx)
+            if any(w is not None for w in self._workers.values()):
+                self._run_btn.setText("Остановить все")
+
+    def _toggle_pause(self):
+        if self._paused:
+            for w in self._workers.values():
+                if w:
+                    w.resume()
+            self._paused = False
+            self._pause_btn.setText("Пауза")
+            self._on_log("Возобновлена", "info")
+        else:
+            for w in self._workers.values():
+                if w:
+                    w.pause()
+            self._paused = True
+            self._pause_btn.setText("Продолжить")
+            self._on_log("На паузе", "warn")
+
+    def _on_failed(self, recipient):
+        if recipient not in self._failed_recipients:
+            self._failed_recipients.append(recipient)
+
+    def _on_log(self, message, level):
+        colors = {"ok": "#6a9e80", "err": "#b06070", "warn": "#a08858", "info": "#5878a8"}
+        color = colors.get(level, "#5a6a88")
+        ts = datetime.now().strftime("%H:%M:%S")
+        self.log_view.append(
+            f'<span style="color:#2e3a52">[{ts}]</span> '
+            f'<span style="color:{color}">{message}</span>'
+        )
+        if level == "ok":
+            self._ok_count += 1
+            self.stat_ok.set_value(self._ok_count)
+        elif level == "err":
+            self._err_count += 1
+            self.stat_err.set_value(self._err_count)
+
+    def _on_progress(self, current, total):
+        if total > 0:
+            self.progress_bar.setValue(current)
+            self.stat_left.set_value(max(0, total - current))
+
+    def _build_logs_page(self):
+        w = self._mk_page()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(36, 36, 36, 36)
+        lay.setSpacing(14)
+
+        hdr = QLabel("Логи")
+        hdr.setObjectName("header")
+        lay.addWidget(hdr)
+
+        sep = QFrame()
+        sep.setObjectName("separator")
+        lay.addWidget(sep)
+
+        content = QHBoxLayout()
+        content.setSpacing(24)
+
+        left = QVBoxLayout()
+        lbl_tags = QLabel("ТЕГИ БЕЗ ОТВЕТА")
+        lbl_tags.setObjectName("section")
+        left.addWidget(lbl_tags)
+        self._failed_tags_view = QTextEdit()
+        self._failed_tags_view.setReadOnly(True)
+        self._failed_tags_view.setStyleSheet("""
+            QTextEdit {
+                background: #13161f;
+                border: 1px solid #232840;
+                border-radius: 10px;
+                padding: 12px 14px;
+                font-size: 13px;
+                color: #dde3f0;
+            }
+        """)
+        left.addWidget(self._failed_tags_view)
+        content.addLayout(left, 1)
+
+        right = QVBoxLayout()
+        lbl_reasons = QLabel("ПРИЧИНЫ")
+        lbl_reasons.setObjectName("section")
+        right.addWidget(lbl_reasons)
+        self._failed_reasons_view = QTextEdit()
+        self._failed_reasons_view.setReadOnly(True)
+        self._failed_reasons_view.setStyleSheet("""
+            QTextEdit {
+                background: #13161f;
+                border: 1px solid #232840;
+                border-radius: 10px;
+                padding: 12px 14px;
+                font-size: 13px;
+                color: #dde3f0;
+            }
+        """)
+        right.addWidget(self._failed_reasons_view)
+        content.addLayout(right, 1)
+        lay.addLayout(content)
+
+        clear_btn = AnimatedButton("Очистить")
+        clear_btn.clicked.connect(self._clear_logs)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(clear_btn)
+        lay.addLayout(btn_row)
+        return w
+
+    def _clear_logs(self):
+        self._failed_entries = []
+        self._failed_tags_view.clear()
+        self._failed_reasons_view.clear()
+
+    def _on_failed_detail(self, recipient, reason):
+        if recipient not in [e[0] for e in self._failed_entries]:
+            self._failed_entries.append((recipient, reason))
+        self._refresh_logs()
+
+    def _refresh_logs(self):
+        entries = getattr(self, "_failed_entries", [])
+        tags_text = "\n".join(f"{i+1}  {rec}" for i, (rec, _) in enumerate(entries))
+        reasons_text = "\n".join(f"{i+1}  {rec}  {reason}" for i, (rec, reason) in enumerate(entries))
+        self._failed_tags_view.setPlainText(tags_text)
+        self._failed_reasons_view.setPlainText(reasons_text)
+
+
+def check_for_update(parent_widget=None):
+    try:
+        with urllib.request.urlopen(GITHUB_VERSION_URL, timeout=5) as r:
+            latest = r.read().decode().strip()
+        if latest == APP_VERSION:
+            return
+        msg = QMessageBox(parent_widget)
+        msg.setWindowTitle("Доступно обновление")
+        msg.setText(f"Новая версия: {latest}\nТекущая: {APP_VERSION}\n\nОбновить сейчас?")
+        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        msg.setStyleSheet(STYLE)
+        if msg.exec_() == QMessageBox.Yes:
+            _do_update()
+    except Exception:
+        pass
+
+
+def _do_update():
+    try:
+        current = Path(sys.argv[0]).resolve()
+        backup = current.with_suffix(".py.bak")
+        with urllib.request.urlopen(GITHUB_RAW_URL, timeout=15) as r:
+            new_code = r.read()
+        backup.write_bytes(current.read_bytes())
+        current.write_bytes(new_code)
+        subprocess.Popen([sys.executable] + sys.argv)
+        sys.exit(0)
+    except Exception as e:
+        QMessageBox.critical(None, "Ошибка обновления", str(e))
+
+
+def resource_path(name):
+    base = getattr(sys, "_MEIPASS", Path(__file__).parent)
+    return str(Path(base) / name)
+
+
+if __name__ == "__main__":
+    import traceback
+
+    def _excepthook(exc_type, exc_value, exc_tb):
+        msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        print(msg, file=sys.stderr)
+        try:
+            Path("crash.log").write_text(msg, encoding="utf-8")
+        except Exception:
+            pass
+        try:
+            QMessageBox.critical(None, "Ошибка", msg)
+        except Exception:
+            pass
+
+    sys.excepthook = _excepthook
+
+    try:
+        app = QApplication(sys.argv)
+        app.setStyle("Fusion")
+        icon_file = resource_path("icon.ico")
+        if Path(icon_file).exists():
+            app.setWindowIcon(QIcon(icon_file))
+        win = MainWindow()
+        if Path(icon_file).exists():
+            win.setWindowIcon(QIcon(icon_file))
+        win.show()
+        threading.Thread(target=lambda: check_for_update(win), daemon=True).start()
+        sys.exit(app.exec_())
+    except Exception:
+        traceback.print_exc()
+        try:
+            Path("crash.log").write_text(traceback.format_exc(), encoding="utf-8")
+        except Exception:
+            pass
