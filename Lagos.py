@@ -9,7 +9,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-APP_VERSION = "3.9"
+APP_VERSION = "4.0"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/Lagos.py"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
 
@@ -2587,7 +2587,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_chat_contacts_replied(self):
         chat_log = self.data.get("chat_log", {})
-        recipients = self.data.get("recipients", [])
+        recipients = getattr(self, "_chat_all_recs", self.data.get("recipients", []))
         self.chat_contacts_list.blockSignals(True)
         current = self.chat_contacts_list.currentRow()
         self.chat_contacts_list.clear()
