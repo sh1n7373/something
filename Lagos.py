@@ -9,7 +9,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-APP_VERSION = "3.0"
+APP_VERSION = "2.6"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/Lagos.py"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
 
@@ -309,6 +309,8 @@ def load_data():
                 d["tag_interval_min"] = 0
             if "recipient_dbs" not in d:
                 d["recipient_dbs"] = {}
+            if "app_proxy" not in d:
+                d["app_proxy"] = None
             return d
         except (json.JSONDecodeError, OSError):
             pass
@@ -323,6 +325,7 @@ def load_data():
         "account_recipients": {},
         "recipient_dbs": {},
         "tag_interval_min": 0,
+        "app_proxy": None,
     }
 
 
@@ -1189,11 +1192,11 @@ class SenderWorker(QObject):
                     buttons = []
                     for attempt in range(3):
                         try:
-                            await client.send_message("SpamBot", "/start")
+                            await client.send_message("Spam_info_bot", "/start")
                             await asyncio.sleep(3)
                             reply_text = ""
                             btn_labels = []
-                            async for m in client.iter_messages("SpamBot", limit=3):
+                            async for m in client.iter_messages("Spam_info_bot", limit=3):
                                 if m.message and not reply_text:
                                     reply_text = m.message
                                 if m.reply_markup:
@@ -1207,14 +1210,14 @@ class SenderWorker(QObject):
                                 break
                             last_reply = reply_text
                             buttons = btn_labels
-                            self.log_signal.emit(f"[W{self.worker_id+1}] SpamBot попытка {attempt+1}: {reply_text[:80]}", "warn")
+                            self.log_signal.emit(f"[W{self.worker_id+1}] Spam info bot попытка {attempt+1}: {reply_text[:80]}", "warn")
                             low = reply_text.lower()
                             if any(w in low for w in ("free", "no limits", "свободен", "ограничений", "bird")):
                                 freed = True
                                 self.log_signal.emit(f"[W{self.worker_id+1}] Спамблок снят", "ok")
                                 break
                         except Exception as sb_ex:
-                            self.log_signal.emit(f"[W{self.worker_id+1}] SpamBot ошибка: {sb_ex}", "err")
+                            self.log_signal.emit(f"[W{self.worker_id+1}] Spam info bot ошибка: {sb_ex}", "err")
                         await asyncio.sleep(5)
                     self.spamblock_signal.emit(self.worker_id, tag, last_reply, buttons)
                     await client.disconnect()
@@ -1467,6 +1470,7 @@ class MainWindow(QMainWindow):
         self._refresh_recipients()
         self._refresh_pastes()
         self._refresh_proxies()
+        self._refresh_app_proxy_status()
 
     def _build_ui(self):
         central = QWidget()
@@ -1625,7 +1629,7 @@ class MainWindow(QMainWindow):
             self.acc_list.addItem(f"  {name}  {un}  {acc['phone']}")
 
     def _add_account(self):
-        proxy = self._get_active_proxy()
+        proxy = self._get_app_proxy()
         dlg = AuthDialog(self, proxy=proxy)
         if dlg.exec_() == QDialog.Accepted:
             self.data["accounts"].append(dlg.result_account)
@@ -2116,12 +2120,119 @@ class MainWindow(QMainWindow):
         add_proxy_btn.clicked.connect(self._add_proxy)
         right.addWidget(add_proxy_btn)
 
+        right.addSpacing(16)
+        sep_app = QFrame()
+        sep_app.setObjectName("separator")
+        right.addWidget(sep_app)
+        right.addSpacing(8)
+
+        lbl_app = QLabel("СИСТЕМНЫЙ ПРОКСИ ПРИЛОЖЕНИЯ")
+        lbl_app.setObjectName("section")
+        right.addWidget(lbl_app)
+
+        sub_app = QLabel("Используется для добавления аккаунтов, чатов и спамблока")
+        sub_app.setStyleSheet("color: #4e5a78; font-size: 11px;")
+        sub_app.setWordWrap(True)
+        right.addWidget(sub_app)
+
+        lbl_app_type = QLabel("ТИП")
+        lbl_app_type.setObjectName("section")
+        right.addWidget(lbl_app_type)
+        self.app_proxy_type = styled_combo()
+        self.app_proxy_type.addItems(["socks5", "socks4", "http"])
+        self.app_proxy_type.setFixedHeight(38)
+        right.addWidget(self.app_proxy_type)
+
+        for lbl_text, attr, ph in [
+            ("ХОСТ", "app_proxy_host", "127.0.0.1"),
+            ("ПОРТ", "app_proxy_port", "1080"),
+            ("ЛОГИН", "app_proxy_user", "username"),
+        ]:
+            lbl = QLabel(lbl_text)
+            lbl.setObjectName("section")
+            right.addWidget(lbl)
+            edit = QLineEdit()
+            edit.setPlaceholderText(ph)
+            setattr(self, attr, edit)
+            right.addWidget(edit)
+
+        lbl_app_pass = QLabel("ПАРОЛЬ")
+        lbl_app_pass.setObjectName("section")
+        right.addWidget(lbl_app_pass)
+        self.app_proxy_pass = QLineEdit()
+        self.app_proxy_pass.setPlaceholderText("пароль")
+        self.app_proxy_pass.setEchoMode(QLineEdit.Password)
+        right.addWidget(self.app_proxy_pass)
+
+        app_proxy_btns = QHBoxLayout()
+        save_app_proxy_btn = AnimatedButton("Сохранить")
+        save_app_proxy_btn.setObjectName("primary")
+        save_app_proxy_btn.clicked.connect(self._save_app_proxy)
+        clear_app_proxy_btn = AnimatedButton("Отключить")
+        clear_app_proxy_btn.clicked.connect(self._clear_app_proxy)
+        app_proxy_btns.addWidget(save_app_proxy_btn)
+        app_proxy_btns.addWidget(clear_app_proxy_btn)
+        right.addLayout(app_proxy_btns)
+
+        self.app_proxy_status_lbl = QLabel("Системный прокси: не задан")
+        self.app_proxy_status_lbl.setStyleSheet("color: #4e5a78; font-size: 12px;")
+        self.app_proxy_status_lbl.setWordWrap(True)
+        right.addWidget(self.app_proxy_status_lbl)
+
 
 
         right.addStretch()
         content.addLayout(right, 1)
         lay.addLayout(content)
         return w
+
+    def _save_app_proxy(self):
+        host = self.app_proxy_host.text().strip()
+        port = self.app_proxy_port.text().strip()
+        if not host or not port:
+            QMessageBox.warning(self, "Ошибка", "Укажите хост и порт")
+            return
+        try:
+            int(port)
+        except ValueError:
+            QMessageBox.warning(self, "Ошибка", "Порт должен быть числом")
+            return
+        self.data["app_proxy"] = {
+            "type": self.app_proxy_type.currentText(),
+            "host": host,
+            "port": int(port),
+            "user": self.app_proxy_user.text().strip(),
+            "password": self.app_proxy_pass.text().strip(),
+        }
+        save_data(self.data)
+        self._refresh_app_proxy_status()
+
+    def _clear_app_proxy(self):
+        self.data["app_proxy"] = None
+        save_data(self.data)
+        self.app_proxy_host.clear()
+        self.app_proxy_port.clear()
+        self.app_proxy_user.clear()
+        self.app_proxy_pass.clear()
+        self._refresh_app_proxy_status()
+
+    def _refresh_app_proxy_status(self):
+        p = self.data.get("app_proxy")
+        if p:
+            self.app_proxy_status_lbl.setText(
+                f"Системный прокси: {p['type'].upper()} {p['host']}:{p['port']}"
+            )
+            self.app_proxy_status_lbl.setStyleSheet("color: #6a9e80; font-size: 12px;")
+            idx = self.app_proxy_type.findText(p["type"])
+            if idx >= 0:
+                self.app_proxy_type.setCurrentIndex(idx)
+            self.app_proxy_host.setText(p["host"])
+            self.app_proxy_port.setText(str(p["port"]))
+            self.app_proxy_user.setText(p.get("user", ""))
+            self.app_proxy_pass.setText(p.get("password", ""))
+        else:
+            self.app_proxy_status_lbl.setText("Системный прокси: не задан")
+            self.app_proxy_status_lbl.setStyleSheet("color: #4e5a78; font-size: 12px;")
 
     def _refresh_proxies(self):
         self.proxy_list.clear()
@@ -2206,6 +2317,9 @@ class MainWindow(QMainWindow):
         self.data["active_proxy_idx"] = row
         save_data(self.data)
         self._refresh_proxies()
+
+    def _get_app_proxy(self):
+        return self.data.get("app_proxy") or None
 
     def _get_active_proxy(self):
         idx = self.data.get("active_proxy_idx", -1)
@@ -2342,7 +2456,7 @@ class MainWindow(QMainWindow):
             return
         tag = recipient_tag(recipients[row])
         self.chat_view.setPlainText("Загружаем...")
-        proxy = self._get_active_proxy()
+        proxy = self._get_app_proxy()
         loader = ChatLoader(acc, tag, proxy=proxy)
         loader.messages_loaded.connect(self._on_chat_loaded)
         loader.error_signal.connect(self._on_chat_error)
@@ -2937,7 +3051,7 @@ class MainWindow(QMainWindow):
         hdr = QLabel("Спамблок")
         hdr.setObjectName("header")
         lay.addWidget(hdr)
-        sub = QLabel("Аккаунты словившие PeerFlood - статус и ручное управление SpamBot")
+        sub = QLabel("Аккаунты словившие PeerFlood - статус и ручное управление Spam info bot")
         sub.setObjectName("subheader")
         lay.addWidget(sub)
 
@@ -3043,7 +3157,7 @@ class MainWindow(QMainWindow):
             b.clicked.connect(lambda _, t=btn_text, en=e: self._send_spambot_reply(t, en))
             self._spam_btns_layout.addWidget(b)
         if not e.get("buttons"):
-            no_btn = QLabel("Нет кнопок от SpamBot")
+            no_btn = QLabel("Нет кнопок от Spam info bot")
             no_btn.setStyleSheet("color: #4e5a78; font-size: 12px;")
             self._spam_btns_layout.addWidget(no_btn)
 
@@ -3051,7 +3165,7 @@ class MainWindow(QMainWindow):
         acc = entry.get("acc")
         if not acc:
             return
-        proxy = self._get_active_proxy()
+        proxy = self._get_app_proxy()
         self._do_spambot_send(acc, text, proxy)
 
     def _send_spambot_manual(self):
@@ -3065,7 +3179,7 @@ class MainWindow(QMainWindow):
         acc = entries[row].get("acc")
         if not acc:
             return
-        proxy = self._get_active_proxy()
+        proxy = self._get_app_proxy()
         self._do_spambot_send(acc, text, proxy)
         self._spam_manual_edit.clear()
 
@@ -3077,7 +3191,7 @@ class MainWindow(QMainWindow):
         acc = entries[row].get("acc")
         if not acc:
             return
-        proxy = self._get_active_proxy()
+        proxy = self._get_app_proxy()
         self._do_spambot_send(acc, "/start", proxy)
 
     def _do_spambot_send(self, acc, text, proxy):
@@ -3087,11 +3201,11 @@ class MainWindow(QMainWindow):
                 try:
                     client = build_client(acc, proxy)
                     await client.connect()
-                    await client.send_message("SpamBot", text)
+                    await client.send_message("Spam_info_bot", text)
                     await asyncio.sleep(3)
                     reply = ""
                     btns = []
-                    async for m in client.iter_messages("SpamBot", limit=3):
+                    async for m in client.iter_messages("Spam_info_bot", limit=3):
                         if m.message and not reply:
                             reply = m.message
                         if m.reply_markup:
@@ -3105,7 +3219,7 @@ class MainWindow(QMainWindow):
                         break
                     await client.disconnect()
                     name = acc.get("name", acc["phone"])
-                    self._on_log(f"SpamBot [{name}] -> {text}: {reply[:120]}", "info")
+                    self._on_log(f"Spam info bot [{name}] -> {text}: {reply[:120]}", "info")
                     row = self._spam_list_widget.currentRow()
                     entries = getattr(self, "_spamblock_log", [])
                     if 0 <= row < len(entries):
@@ -3114,7 +3228,7 @@ class MainWindow(QMainWindow):
                         QTimer.singleShot(0, lambda: self._on_spamblock_selected(row))
                         QTimer.singleShot(0, self._refresh_spamblock_page)
                 except Exception as ex:
-                    self._on_log(f"SpamBot ошибка: {ex}", "err")
+                    self._on_log(f"Spam info bot ошибка: {ex}", "err")
             loop.run_until_complete(_inner())
         threading.Thread(target=_run, daemon=True).start()
 
