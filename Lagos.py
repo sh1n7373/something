@@ -9,7 +9,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-APP_VERSION = "2.7"
+APP_VERSION = "3.0"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/Lagos.py"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
 
@@ -1497,7 +1497,7 @@ class MainWindow(QMainWindow):
             ("Логи", 4),
             ("Прокси", 5),
             ("Чаты", 6),
-            ("Спам", 7),
+            ("Спамблок", 7),
         ]
         for name, idx in tabs:
             btn = SidebarButton(name)
