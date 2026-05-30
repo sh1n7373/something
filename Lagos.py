@@ -9,7 +9,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-APP_VERSION = "2.6"
+APP_VERSION = "3.0"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/Lagos.py"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
 
@@ -1499,9 +1499,10 @@ class MainWindow(QMainWindow):
             ("Пасты", 2),
             ("Отписи", 3),
             ("Логи", 4),
-            ("Прокси", 5),
-            ("Чаты", 6),
-            ("Спамблок", 7),
+            ("Прокси пул", 5),
+            ("Системный прокси", 6),
+            ("Чаты", 7),
+            ("Спамблок", 8),
         ]
         for name, idx in tabs:
             btn = SidebarButton(name)
@@ -1566,6 +1567,7 @@ class MainWindow(QMainWindow):
             self._build_sender_page(),
             self._build_logs_page(),
             self._build_proxies_page(),
+            self._build_system_proxy_page(),
             self._build_chats_page(),
             self._build_spamblock_page(),
         ]
@@ -2017,10 +2019,10 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(36, 36, 36, 36)
         lay.setSpacing(14)
 
-        hdr = QLabel("Прокси")
+        hdr = QLabel("Прокси пул")
         hdr.setObjectName("header")
         lay.addWidget(hdr)
-        sub = QLabel("Управление прокси серверами")
+        sub = QLabel("Прокси для отписей")
         sub.setObjectName("subheader")
         lay.addWidget(sub)
 
@@ -2120,70 +2122,83 @@ class MainWindow(QMainWindow):
         add_proxy_btn.clicked.connect(self._add_proxy)
         right.addWidget(add_proxy_btn)
 
-        right.addSpacing(16)
-        sep_app = QFrame()
-        sep_app.setObjectName("separator")
-        right.addWidget(sep_app)
-        right.addSpacing(8)
+        right.addStretch()
+        content.addLayout(right, 1)
+        lay.addLayout(content)
+        return w
 
-        lbl_app = QLabel("СИСТЕМНЫЙ ПРОКСИ ПРИЛОЖЕНИЯ")
-        lbl_app.setObjectName("section")
-        right.addWidget(lbl_app)
+    def _build_system_proxy_page(self):
+        w = self._mk_page()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(36, 36, 36, 36)
+        lay.setSpacing(14)
 
-        sub_app = QLabel("Используется для добавления аккаунтов, чатов и спамблока")
-        sub_app.setStyleSheet("color: #4e5a78; font-size: 11px;")
-        sub_app.setWordWrap(True)
-        right.addWidget(sub_app)
+        hdr = QLabel("Системный прокси")
+        hdr.setObjectName("header")
+        lay.addWidget(hdr)
+        sub = QLabel("Используется для добавления аккаунтов, чатов и спамблока")
+        sub.setObjectName("subheader")
+        lay.addWidget(sub)
 
-        lbl_app_type = QLabel("ТИП")
-        lbl_app_type.setObjectName("section")
-        right.addWidget(lbl_app_type)
+        sep = QFrame()
+        sep.setObjectName("separator")
+        lay.addWidget(sep)
+
+        form = QVBoxLayout()
+        form.setSpacing(10)
+
+        lbl_type = QLabel("ТИП")
+        lbl_type.setObjectName("section")
+        form.addWidget(lbl_type)
         self.app_proxy_type = styled_combo()
         self.app_proxy_type.addItems(["socks5", "socks4", "http"])
         self.app_proxy_type.setFixedHeight(38)
-        right.addWidget(self.app_proxy_type)
+        self.app_proxy_type.setMaximumWidth(320)
+        form.addWidget(self.app_proxy_type)
 
         for lbl_text, attr, ph in [
             ("ХОСТ", "app_proxy_host", "127.0.0.1"),
             ("ПОРТ", "app_proxy_port", "1080"),
-            ("ЛОГИН", "app_proxy_user", "username"),
+            ("ЛОГИН (необязательно)", "app_proxy_user", "username"),
         ]:
             lbl = QLabel(lbl_text)
             lbl.setObjectName("section")
-            right.addWidget(lbl)
+            form.addWidget(lbl)
             edit = QLineEdit()
             edit.setPlaceholderText(ph)
+            edit.setMaximumWidth(320)
             setattr(self, attr, edit)
-            right.addWidget(edit)
+            form.addWidget(edit)
 
-        lbl_app_pass = QLabel("ПАРОЛЬ")
-        lbl_app_pass.setObjectName("section")
-        right.addWidget(lbl_app_pass)
+        lbl_pass = QLabel("ПАРОЛЬ (необязательно)")
+        lbl_pass.setObjectName("section")
+        form.addWidget(lbl_pass)
         self.app_proxy_pass = QLineEdit()
         self.app_proxy_pass.setPlaceholderText("пароль")
         self.app_proxy_pass.setEchoMode(QLineEdit.Password)
-        right.addWidget(self.app_proxy_pass)
+        self.app_proxy_pass.setMaximumWidth(320)
+        form.addWidget(self.app_proxy_pass)
 
-        app_proxy_btns = QHBoxLayout()
-        save_app_proxy_btn = AnimatedButton("Сохранить")
-        save_app_proxy_btn.setObjectName("primary")
-        save_app_proxy_btn.clicked.connect(self._save_app_proxy)
-        clear_app_proxy_btn = AnimatedButton("Отключить")
-        clear_app_proxy_btn.clicked.connect(self._clear_app_proxy)
-        app_proxy_btns.addWidget(save_app_proxy_btn)
-        app_proxy_btns.addWidget(clear_app_proxy_btn)
-        right.addLayout(app_proxy_btns)
+        form.addSpacing(8)
+        btns = QHBoxLayout()
+        save_btn = AnimatedButton("Сохранить")
+        save_btn.setObjectName("primary")
+        save_btn.setFixedWidth(150)
+        save_btn.clicked.connect(self._save_app_proxy)
+        clear_btn = AnimatedButton("Отключить")
+        clear_btn.setFixedWidth(150)
+        clear_btn.clicked.connect(self._clear_app_proxy)
+        btns.addWidget(save_btn)
+        btns.addWidget(clear_btn)
+        btns.addStretch()
+        form.addLayout(btns)
 
         self.app_proxy_status_lbl = QLabel("Системный прокси: не задан")
         self.app_proxy_status_lbl.setStyleSheet("color: #4e5a78; font-size: 12px;")
-        self.app_proxy_status_lbl.setWordWrap(True)
-        right.addWidget(self.app_proxy_status_lbl)
+        form.addWidget(self.app_proxy_status_lbl)
 
-
-
-        right.addStretch()
-        content.addLayout(right, 1)
-        lay.addLayout(content)
+        form.addStretch()
+        lay.addLayout(form)
         return w
 
     def _save_app_proxy(self):
