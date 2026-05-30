@@ -2917,15 +2917,12 @@ def _do_update(parent_widget=None):
         is_frozen = getattr(sys, "frozen", False)
 
         if is_frozen:
-            # Запущен как .exe
             current_exe = Path(sys.executable).resolve()
             current_dir = current_exe.parent
 
-            # Перезаписываем Lagos.py новой версией
             lagos_py = current_dir / "Lagos.py"
             lagos_py.write_bytes(new_code)
 
-            # Удаляем старый .exe (может не удалиться пока запущен — не страшно)
             try:
                 current_exe.unlink()
             except Exception:
@@ -2940,7 +2937,6 @@ def _do_update(parent_widget=None):
             sys.exit(0)
 
         else:
-            # Запущен как .py — заменяем и перезапускаем автоматически
             current = Path(sys.argv[0]).resolve()
             backup = current.with_suffix(".bak")
             backup.write_bytes(current.read_bytes())
