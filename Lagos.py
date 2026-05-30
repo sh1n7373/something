@@ -83,71 +83,71 @@ def _set_session_wal(phone, chat_mode=False):
 
 STYLE = """
 QMainWindow, QDialog {
-    background:
+    background: #1a1d26;
 }
 QWidget {
-    background:
-    color:
+    background: #1a1d26;
+    color: #dde3f0;
     font-family: 'Helvetica Neue', 'Segoe UI', sans-serif;
     font-size: 13px;
 }
 QPushButton {
-    background:
-    color:
-    border: 1px solid
+    background: #1e2230;
+    color: #dde3f0;
+    border: 1px solid #323a52;
     border-radius: 10px;
     padding: 8px 20px;
     font-size: 13px;
     font-weight: 500;
 }
 QPushButton:hover {
-    background:
-    border-color:
-    color:
+    background: #252c42;
+    border-color: #4a6fa5;
+    color: #ffffff;
 }
 QPushButton:pressed {
-    background:
-    color:
+    background: #2d3650;
+    color: #fff;
 }
-QPushButton
-    background:
-    border: 1px solid
-    color:
+QPushButton#primary {
+    background: #1e2230;
+    border: 1px solid #323a52;
+    color: #dde3f0;
     font-weight: 500;
 }
-QPushButton
-    background:
-    border-color:
-    color:
+QPushButton#primary:hover {
+    background: #252c42;
+    border-color: #4a6fa5;
+    color: #ffffff;
 }
-QPushButton
-    background:
-    border: 1px solid
-    color:
+QPushButton#danger {
+    background: #1e2230;
+    border: 1px solid #323a52;
+    color: #dde3f0;
 }
-QPushButton
-    background:
-    border-color:
-    color:
+QPushButton#danger:hover {
+    background: #252c42;
+    border-color: #4a6fa5;
+    color: #ffffff;
 }
 QLabel {
     background: transparent;
 }
 QLineEdit, QTextEdit, QPlainTextEdit {
-    background:
-    border: 1px solid
+    background: #141720;
+    border: 1px solid #2c3348;
     border-radius: 8px;
     padding: 8px 12px;
-    color:
-    selection-background-color:
+    color: #dde3f0;
+    selection-background-color: #4a6fa5;
 }
 QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {
-    border-color:
-    background:
+    border-color: #4a6fa5;
+    background: #161a24;
 }
 QListWidget {
-    background:
-    border: 1px solid
+    background: #141720;
+    border: 1px solid #2c3348;
     border-radius: 8px;
     outline: none;
     padding: 4px;
@@ -156,79 +156,79 @@ QListWidget::item {
     border-radius: 6px;
     padding: 7px 10px;
     margin: 1px 2px;
-    color:
+    color: #a8b8d8;
 }
 QListWidget::item:selected {
-    background:
-    color:
+    background: #2a3a5a;
+    color: #e8eef8;
 }
 QListWidget::item:hover {
-    background:
+    background: #202535;
 }
 QScrollBar:vertical {
-    background:
+    background: #141720;
     width: 6px;
     border-radius: 3px;
 }
 QScrollBar::handle:vertical {
-    background:
+    background: #2c3a5a;
     border-radius: 3px;
     min-height: 30px;
 }
 QScrollBar::handle:vertical:hover {
-    background:
+    background: #4a6fa5;
 }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-QLabel
+QLabel#header {
     font-size: 22px;
     font-weight: 700;
-    color:
+    color: #e8eef8;
     letter-spacing: -0.5px;
 }
-QLabel
+QLabel#subheader {
     font-size: 12px;
-    color:
+    color: #4e5a78;
 }
-QLabel
+QLabel#section {
     font-size: 10px;
     font-weight: 700;
-    color:
+    color: #6b82c0;
     letter-spacing: 1.8px;
 }
-QFrame
-    background:
-    border: 1px solid
+QFrame#card {
+    background: #1e2230;
+    border: 1px solid #272f42;
     border-radius: 12px;
 }
-QFrame
-    background:
+QFrame#separator {
+    background: #252c3e;
     max-height: 1px;
     min-height: 1px;
 }
 QProgressBar {
-    background:
+    background: #1e2230;
     border: none;
     border-radius: 3px;
     height: 5px;
 }
 QProgressBar::chunk {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0
+        stop:0 #4a6fa5, stop:1 #6b9ed4);
     border-radius: 3px;
 }
 QComboBox {
-    background:
-    border: 1px solid
+    background: #141720;
+    border: 1px solid #2c3348;
     border-radius: 8px;
     padding: 8px 12px;
-    color:
+    color: #dde3f0;
     min-height: 34px;
 }
 QComboBox:focus {
-    border-color:
+    border-color: #4a6fa5;
 }
 QComboBox:on {
-    border-color:
+    border-color: #4a6fa5;
     border-bottom-left-radius: 0px;
     border-bottom-right-radius: 0px;
 }
@@ -236,10 +236,10 @@ QComboBox::drop-down {
     subcontrol-origin: padding;
     subcontrol-position: top right;
     width: 28px;
-    border-left: 1px solid
+    border-left: 1px solid #2c3348;
     border-top-right-radius: 8px;
     border-bottom-right-radius: 8px;
-    background:
+    background: #1a1f30;
 }
 QComboBox::down-arrow {
     width: 10px;
@@ -247,15 +247,15 @@ QComboBox::down-arrow {
     image: none;
     border-left: 4px solid transparent;
     border-right: 4px solid transparent;
-    border-top: 5px solid
+    border-top: 5px solid #6b82c0;
 }
 QComboBox QAbstractItemView {
-    background:
-    border: 1px solid
+    background: #141720;
+    border: 1px solid #4a6fa5;
     border-radius: 6px;
-    selection-background-color:
-    selection-color:
-    color:
+    selection-background-color: #2a3a5a;
+    selection-color: #e8eef8;
+    color: #dde3f0;
     outline: none;
     padding: 4px;
 }
@@ -265,35 +265,35 @@ QComboBox QAbstractItemView::item {
     border-radius: 4px;
     margin: 1px 3px;
     background: transparent;
-    color:
+    color: #a8b8d8;
 }
 QComboBox QAbstractItemView::item:hover {
-    background:
-    color:
+    background: #1e2538;
+    color: #dde3f0;
 }
 QComboBox QAbstractItemView::item:selected {
-    background:
-    color:
+    background: #2a3a5a;
+    color: #e8eef8;
 }
 """
 
 ARROW_BTN_STYLE = """
 QPushButton {
-    background:
+    background: #1e2538;
     border: none;
-    border-left: 1px solid
-    color:
+    border-left: 1px solid #2c3348;
+    color: #6b82c0;
     font-size: 9px;
     padding: 0px;
     min-width: 26px;
     max-width: 26px;
 }
 QPushButton:hover {
-    background:
-    color:
+    background: #253050;
+    color: #a0b8e0;
 }
 QPushButton:pressed {
-    background:
+    background: #3d5080;
 }
 """
 
@@ -661,9 +661,9 @@ class SidebarButton(QPushButton):
     def setChecked(self, v):
         super().setChecked(v)
         if v:
-            self._run_anim(QColor("
+            self._run_anim(QColor("#1e2a48"), QColor("#6b9ed4"), 1.0)
         else:
-            self._run_anim(QColor("
+            self._run_anim(QColor("#141720"), QColor("#4e5a78"), 0.0)
 
     def paintEvent(self, e):
         p = QPainter(self)
@@ -675,7 +675,7 @@ class SidebarButton(QPushButton):
         if self._indicator > 0:
             bar_h = int(r.height() * 0.5 * self._indicator)
             bar_y = (r.height() - bar_h) // 2
-            p.setBrush(QColor("
+            p.setBrush(QColor("#4a6fa5"))
             p.drawRoundedRect(QRect(0, bar_y, 3, bar_h), 1, 1)
         p.setPen(self._fg)
         font = self.font()
@@ -693,7 +693,7 @@ class AnimatedButton(QPushButton):
         self._anim = QPropertyAnimation(self, b"_glow_val")
         self._anim.setDuration(300)
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
-        self._border_color = QColor("
+        self._border_color = QColor("#323a52")
         self._bc_anim = QPropertyAnimation(self, b"_bc_val")
         self._bc_anim.setDuration(300)
         self._bc_anim.setEasingCurve(QEasingCurve.OutCubic)
@@ -715,7 +715,7 @@ class AnimatedButton(QPushButton):
         self._anim.setStartValue(self._glow)
         self._anim.setEndValue(1.0)
         self._bc_anim.setStartValue(self._border_color)
-        self._bc_anim.setEndValue(QColor("
+        self._bc_anim.setEndValue(QColor("#4a6fa5"))
         self._anim.start(); self._bc_anim.start()
         super().enterEvent(e)
 
@@ -724,7 +724,7 @@ class AnimatedButton(QPushButton):
         self._anim.setStartValue(self._glow)
         self._anim.setEndValue(0.0)
         self._bc_anim.setStartValue(self._border_color)
-        self._bc_anim.setEndValue(QColor("
+        self._bc_anim.setEndValue(QColor("#323a52"))
         self._anim.start(); self._bc_anim.start()
         super().leaveEvent(e)
 
@@ -732,8 +732,8 @@ class AnimatedButton(QPushButton):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         r = self.rect()
-        base = QColor("
-        hover = QColor("
+        base = QColor("#1e2230")
+        hover = QColor("#252c42")
         bg = QColor(
             int(base.red()   + (hover.red()   - base.red())   * self._glow),
             int(base.green() + (hover.green() - base.green()) * self._glow),
@@ -747,7 +747,7 @@ class AnimatedButton(QPushButton):
             p.setPen(glow_pen)
             p.setBrush(Qt.NoBrush)
             p.drawRoundedRect(r.adjusted(0,0,-1,-1), 10, 10)
-        p.setPen(QColor("
+        p.setPen(QColor("#dde3f0"))
         font = self.font()
         font.setPointSize(10)
         p.setFont(font)
@@ -783,15 +783,15 @@ class AnimatedProgressBar(QProgressBar):
         p.setRenderHint(QPainter.Antialiasing)
         r = self.rect()
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor("
+        p.setBrush(QColor("#1e2230"))
         p.drawRoundedRect(r, 3, 3)
         if self.maximum() > 0:
             ratio = self._display_val / self.maximum()
             fill_w = int(r.width() * ratio)
             if fill_w > 0:
                 grad = QLinearGradient(0, 0, fill_w, 0)
-                grad.setColorAt(0, QColor("
-                grad.setColorAt(1, QColor("
+                grad.setColorAt(0, QColor("#4a6fa5"))
+                grad.setColorAt(1, QColor("#6b9ed4"))
                 p.setBrush(grad)
                 p.drawRoundedRect(QRect(0, 0, fill_w, r.height()), 3, 3)
         p.end()
@@ -883,12 +883,12 @@ class AuthDialog(QDialog):
         lay.setSpacing(14)
 
         title = QLabel("Подключение аккаунта")
-        title.setStyleSheet("font-size: 18px; font-weight: 700; color:
+        title.setStyleSheet("font-size: 18px; font-weight: 700; color: #e8eef8;")
         lay.addWidget(title)
 
-        link_lbl = QLabel('API ID и API Hash на <a href="https://my.telegram.org" style="color:
+        link_lbl = QLabel('API ID и API Hash на <a href="https://my.telegram.org" style="color:#6b9ed4;">my.telegram.org</a>')
         link_lbl.setOpenExternalLinks(True)
-        link_lbl.setStyleSheet("color:
+        link_lbl.setStyleSheet("color: #4e5a78; font-size: 12px;")
         lay.addWidget(link_lbl)
 
         sep = QFrame()
@@ -920,7 +920,7 @@ class AuthDialog(QDialog):
         lay.addWidget(self.pass_edit)
 
         self.status_lbl = QLabel("")
-        self.status_lbl.setStyleSheet("color:
+        self.status_lbl.setStyleSheet("color: #6b82c0; font-size: 12px;")
         self.status_lbl.setWordWrap(True)
         lay.addWidget(self.status_lbl)
 
@@ -1316,18 +1316,18 @@ class StatCard(QFrame):
         lay.setSpacing(8)
         lbl = QLabel(label)
         lbl.setObjectName("section")
-        lbl.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color:
+        lbl.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color: #6b82c0; letter-spacing: 1.8px;")
         lay.addWidget(lbl)
         self._val = QLabel(value)
-        self._val.setStyleSheet("background: transparent; font-size: 32px; font-weight: 700; color:
+        self._val.setStyleSheet("background: transparent; font-size: 32px; font-weight: 700; color: #c8d8f0; letter-spacing: -1px;")
         lay.addWidget(self._val)
         lay.addStretch()
 
     def set_value(self, v):
         self._val.setText(str(v))
-        self._val.setStyleSheet("background: transparent; font-size: 32px; font-weight: 700; color:
+        self._val.setStyleSheet("background: transparent; font-size: 32px; font-weight: 700; color: #6b9ed4; letter-spacing: -1px;")
         QTimer.singleShot(300, lambda: self._val.setStyleSheet(
-            "background: transparent; font-size: 32px; font-weight: 700; color:
+            "background: transparent; font-size: 32px; font-weight: 700; color: #c8d8f0; letter-spacing: -1px;"))
 
 
 COMBO_VIEW_STYLE = """
@@ -1368,11 +1368,11 @@ class ProxyStatusDot(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(10, 10)
-        self._color = QColor("
+        self._color = QColor("#3a4a68")
 
     def set_status(self, status):
-        colors = {"ok": "
-        self._color = QColor(colors.get(status, "
+        colors = {"ok": "#6a9e80", "err": "#b06070", "checking": "#a08858"}
+        self._color = QColor(colors.get(status, "#3a4a68"))
         self.update()
 
     def paintEvent(self, e):
@@ -1399,16 +1399,16 @@ class ProxyRowWidget(QWidget):
         lay.addWidget(self._dot)
 
         type_lbl = QLabel(proxy_data.get("type", "socks5").upper())
-        type_lbl.setStyleSheet("color:
+        type_lbl.setStyleSheet("color: #6b82c0; font-size: 11px; font-weight: 700; background: transparent; min-width: 50px;")
         lay.addWidget(type_lbl)
 
         host_lbl = QLabel(f"{proxy_data['host']}:{proxy_data['port']}")
-        host_lbl.setStyleSheet("color:
+        host_lbl.setStyleSheet("color: #a8b8d8; background: transparent;")
         lay.addWidget(host_lbl)
 
         if proxy_data.get("user"):
             user_lbl = QLabel(proxy_data["user"])
-            user_lbl.setStyleSheet("color:
+            user_lbl.setStyleSheet("color: #4e5a78; font-size: 11px; background: transparent;")
             lay.addWidget(user_lbl)
 
         lay.addStretch()
@@ -1418,20 +1418,20 @@ class ProxyRowWidget(QWidget):
         lay.addWidget(self._status_lbl)
 
         self._active_lbl = QLabel("")
-        self._active_lbl.setStyleSheet("color:
+        self._active_lbl.setStyleSheet("color: #4a6fa5; font-size: 11px; font-weight: 700; background: transparent; min-width: 50px;")
         lay.addWidget(self._active_lbl)
 
     def set_status(self, status, info=""):
         self._dot.set_status(status)
         if status == "ok":
             self._status_lbl.setText("OK")
-            self._status_lbl.setStyleSheet("color:
+            self._status_lbl.setStyleSheet("color: #6a9e80; font-size: 11px; background: transparent; min-width: 40px;")
         elif status == "err":
             self._status_lbl.setText("ERR")
-            self._status_lbl.setStyleSheet("color:
+            self._status_lbl.setStyleSheet("color: #b06070; font-size: 11px; background: transparent; min-width: 40px;")
         elif status == "checking":
             self._status_lbl.setText("...")
-            self._status_lbl.setStyleSheet("color:
+            self._status_lbl.setStyleSheet("color: #a08858; font-size: 11px; background: transparent; min-width: 40px;")
         else:
             self._status_lbl.setText("")
 
@@ -1477,13 +1477,13 @@ class MainWindow(QMainWindow):
 
         sidebar = QFrame()
         sidebar.setFixedWidth(210)
-        sidebar.setStyleSheet("background:
+        sidebar.setStyleSheet("background: #141720; border: none;")
         sb_lay = QVBoxLayout(sidebar)
         sb_lay.setContentsMargins(12, 24, 12, 20)
         sb_lay.setSpacing(3)
 
         logo_lbl = QLabel("Lagos Sender")
-        logo_lbl.setStyleSheet("font-size: 15px; font-weight: 700; color:
+        logo_lbl.setStyleSheet("font-size: 15px; font-weight: 700; color: #8898c8; letter-spacing: 0.5px; background: transparent; border: none;")
         logo_lbl.setAlignment(Qt.AlignCenter)
         sb_lay.addWidget(logo_lbl)
         sb_lay.addSpacing(20)
@@ -1507,25 +1507,25 @@ class MainWindow(QMainWindow):
 
         sb_lay.addStretch()
         ver_lbl = QLabel(f"v{APP_VERSION}")
-        ver_lbl.setStyleSheet("color:
+        ver_lbl.setStyleSheet("color: #2e3a52; font-size: 11px; background: transparent; border: none;")
         ver_lbl.setAlignment(Qt.AlignCenter)
         sb_lay.addWidget(ver_lbl)
         root.addWidget(sidebar)
 
         sidebar_sep = QFrame()
         sidebar_sep.setFixedWidth(1)
-        sidebar_sep.setStyleSheet("QFrame { background:
+        sidebar_sep.setStyleSheet("QFrame { background: #1e2334; border: none; }")
         root.addWidget(sidebar_sep)
 
         right_wrap = QWidget()
-        right_wrap.setStyleSheet("background:
+        right_wrap.setStyleSheet("background: #1a1d26;")
         right_vlay = QVBoxLayout(right_wrap)
         right_vlay.setContentsMargins(0, 0, 0, 0)
         right_vlay.setSpacing(0)
 
         topbar = QWidget()
         topbar.setFixedHeight(52)
-        topbar.setStyleSheet("background:
+        topbar.setStyleSheet("background: #1a1d26; border-bottom: 1px solid #1e2334;")
         topbar_lay = QHBoxLayout(topbar)
         topbar_lay.setContentsMargins(24, 10, 24, 10)
         topbar_lay.addStretch()
@@ -1586,7 +1586,7 @@ class MainWindow(QMainWindow):
 
     def _mk_page(self):
         w = FadeWidget()
-        w.setStyleSheet("background:
+        w.setStyleSheet("background: #1a1d26;")
         return w
 
     def _build_accounts_page(self):
@@ -1697,7 +1697,7 @@ class MainWindow(QMainWindow):
         self.rec_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         left.addWidget(self.rec_list)
         self.rec_count = QLabel("0 тегов")
-        self.rec_count.setStyleSheet("color:
+        self.rec_count.setStyleSheet("color: #4e5a78; font-size: 12px;")
         left.addWidget(self.rec_count)
         content.addLayout(left, 2)
 
@@ -1737,7 +1737,7 @@ class MainWindow(QMainWindow):
         right.addWidget(del_sel_btn)
 
         hint = QLabel("Ctrl+Click для выбора нескольких")
-        hint.setStyleSheet("color:
+        hint.setStyleSheet("color: #3a4a68; font-size: 11px;")
         right.addWidget(hint)
 
         clear_btn = AnimatedButton("Очистить список")
@@ -2072,7 +2072,7 @@ class MainWindow(QMainWindow):
         left.addLayout(proxy_btn_row)
 
         self.active_proxy_lbl = QLabel("Активные прокси: нет")
-        self.active_proxy_lbl.setStyleSheet("color:
+        self.active_proxy_lbl.setStyleSheet("color: #4e5a78; font-size: 12px;")
         left.addWidget(self.active_proxy_lbl)
         content.addLayout(left, 2)
 
@@ -2280,7 +2280,7 @@ class MainWindow(QMainWindow):
         self.chat_contacts_list.currentRowChanged.connect(self._open_chat)
         contacts_col.addWidget(self.chat_contacts_list)
         self.chat_status_lbl = QLabel("")
-        self.chat_status_lbl.setStyleSheet("color:
+        self.chat_status_lbl.setStyleSheet("color: #4e5a78; font-size: 11px;")
         contacts_col.addWidget(self.chat_status_lbl)
         content.addLayout(contacts_col, 1)
 
@@ -2365,17 +2365,17 @@ class MainWindow(QMainWindow):
         html_parts = []
         for m in messages:
             if m["out"]:
-                color = "
+                color = "#4a6fa5"
                 align = "right"
                 prefix = "Я"
             else:
-                color = "
+                color = "#6a9e80"
                 align = "left"
                 prefix = tag
             text = m["text"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             html_parts.append(
                 f'<div style="text-align:{align}; margin:6px 0;">'
-                f'<span style="color:
+                f'<span style="color:#3a4a68; font-size:11px;">{prefix} {m["ts"]}</span><br>'
                 f'<span style="color:{color};">{text}</span></div>'
             )
         self.chat_view.setHtml("".join(html_parts))
@@ -2468,7 +2468,7 @@ class MainWindow(QMainWindow):
         self.tag_interval_spin.setSuffix(" мин")
         self.tag_interval_spin.setFixedWidth(160)
         hint_tag = QLabel("0 = без интервала")
-        hint_tag.setStyleSheet("color:
+        hint_tag.setStyleSheet("color: #3a4a68; font-size: 11px; background: transparent;")
         tag_interval_col.addWidget(self.tag_interval_spin)
         tag_interval_col.addWidget(hint_tag)
         glob_lay.addLayout(tag_interval_col)
@@ -2486,7 +2486,7 @@ class MainWindow(QMainWindow):
 
         eta_col = QVBoxLayout()
         self.eta_lbl = QLabel("")
-        self.eta_lbl.setStyleSheet("color:
+        self.eta_lbl.setStyleSheet("color: #4a5878; font-size: 12px; background: transparent;")
         self.eta_lbl.setWordWrap(True)
         eta_col.addStretch()
         eta_col.addWidget(self.eta_lbl)
@@ -2553,7 +2553,7 @@ class MainWindow(QMainWindow):
 
         title_row = QHBoxLayout()
         title_lbl = QLabel(f"ПОТОК {idx + 1}")
-        title_lbl.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color:
+        title_lbl.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color: #6b82c0; letter-spacing: 1.8px;")
         title_row.addWidget(title_lbl)
         title_row.addStretch()
         if idx > 0:
@@ -2570,7 +2570,7 @@ class MainWindow(QMainWindow):
         acc_col = QVBoxLayout()
         acc_col.setSpacing(6)
         lbl_a = QLabel("АККАУНТ")
-        lbl_a.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color:
+        lbl_a.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color: #6b82c0; letter-spacing: 1.8px;")
         acc_col.addWidget(lbl_a)
         acc_combo = styled_combo()
         acc_combo.setFixedHeight(38)
@@ -2584,7 +2584,7 @@ class MainWindow(QMainWindow):
         proxy_col = QVBoxLayout()
         proxy_col.setSpacing(6)
         lbl_p = QLabel("ПРОКСИ")
-        lbl_p.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color:
+        lbl_p.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color: #6b82c0; letter-spacing: 1.8px;")
         proxy_col.addWidget(lbl_p)
         proxy_combo = styled_combo()
         proxy_combo.setFixedHeight(38)
@@ -2597,7 +2597,7 @@ class MainWindow(QMainWindow):
         rec_col = QVBoxLayout()
         rec_col.setSpacing(6)
         lbl_r = QLabel("ТЕГИ (БАЗА)")
-        lbl_r.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color:
+        lbl_r.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color: #6b82c0; letter-spacing: 1.8px;")
         rec_col.addWidget(lbl_r)
         rec_combo = styled_combo()
         rec_combo.setFixedHeight(38)
@@ -2613,7 +2613,7 @@ class MainWindow(QMainWindow):
         pastes_col = QVBoxLayout()
         pastes_col.setSpacing(6)
         lbl_ps = QLabel("ПАСТЫ")
-        lbl_ps.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color:
+        lbl_ps.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color: #6b82c0; letter-spacing: 1.8px;")
         pastes_col.addWidget(lbl_ps)
         paste_list_w = QListWidget()
         paste_list_w.setSelectionMode(QAbstractItemView.NoSelection)
@@ -2681,7 +2681,7 @@ class MainWindow(QMainWindow):
         btn_row.addWidget(pause_btn)
 
         current_tag_lbl = QLabel("")
-        current_tag_lbl.setStyleSheet("color:
+        current_tag_lbl.setStyleSheet("color: #6b82c0; font-size: 12px; background: transparent;")
         btn_row.addWidget(current_tag_lbl)
         btn_row.addStretch()
 
@@ -2922,7 +2922,7 @@ class MainWindow(QMainWindow):
             low = (e["reply"] or "").lower()
             freed = any(w in low for w in ("free", "no limits", "свободен", "ограничений", "bird"))
             status = "СНЯТ" if freed else "БЛОК"
-            color = "
+            color = "#6a9e80" if freed else "#b06070"
             item = QListWidgetItem(f"  [{e['time']}]  {e['acc_name']}  -  {e['stopped_at']}  [{status}]")
             item.setForeground(QColor(color))
             item.setData(Qt.UserRole, e)
@@ -2988,7 +2988,7 @@ class MainWindow(QMainWindow):
         lbl_info.setObjectName("section")
         right.addWidget(lbl_info)
         self._spam_tag_lbl = QLabel("")
-        self._spam_tag_lbl.setStyleSheet("color:
+        self._spam_tag_lbl.setStyleSheet("color: #a8b8d8; font-size: 13px;")
         right.addWidget(self._spam_tag_lbl)
 
         lbl_btns = QLabel("ВАРИАНТЫ ОТВЕТА SPAMBOT")
@@ -3041,7 +3041,7 @@ class MainWindow(QMainWindow):
             self._spam_btns_layout.addWidget(b)
         if not e.get("buttons"):
             no_btn = QLabel("Нет кнопок от SpamBot")
-            no_btn.setStyleSheet("color:
+            no_btn.setStyleSheet("color: #4e5a78; font-size: 12px;")
             self._spam_btns_layout.addWidget(no_btn)
 
     def _send_spambot_reply(self, text, entry):
@@ -3225,11 +3225,11 @@ class MainWindow(QMainWindow):
             self._failed_recipients.append(recipient)
 
     def _on_log(self, message, level):
-        colors = {"ok": "
-        color = colors.get(level, "
+        colors = {"ok": "#6a9e80", "err": "#b06070", "warn": "#a08858", "info": "#5878a8"}
+        color = colors.get(level, "#5a6a88")
         ts = datetime.now().strftime("%H:%M:%S")
         self.log_view.append(
-            f'<span style="color:
+            f'<span style="color:#2e3a52">[{ts}]</span> '
             f'<span style="color:{color}">{message}</span>'
         )
         if level == "ok":
