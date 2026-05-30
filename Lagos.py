@@ -9,7 +9,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-APP_VERSION = "3.8"
+APP_VERSION = "3.9"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/Lagos.py"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
 
@@ -3286,14 +3286,33 @@ class MainWindow(QMainWindow):
             loop = asyncio.new_event_loop()
             async def _inner():
                 try:
-                    client = build_client(acc, proxy)
+                    _set_session_wal(acc["phone"], chat_mode=True)
+                    phone = acc["phone"]
+                    base = phone.replace("+", "")
+                    sess = str(SESSION_DIR / (base + "_chat"))
+                    if not (SESSION_DIR / (base + "_chat.session")).exists():
+                        sess = str(SESSION_DIR / base)
+                    tmp_acc = dict(acc)
+                    tmp_acc["_sess_override"] = sess
+                    client = TelegramClient(sess, acc["api_id"], acc["api_hash"])
+                    if proxy and SOCKS_AVAILABLE:
+                        ptype = proxy.get("type", "socks5").lower()
+                        pt = socks.SOCKS5 if ptype == "socks5" else (socks.SOCKS4 if ptype == "socks4" else socks.HTTP)
+                        client = TelegramClient(sess, acc["api_id"], acc["api_hash"], proxy=(
+                            pt, proxy["host"], int(proxy["port"]), True,
+                            proxy.get("user") or None, proxy.get("password") or None,
+                        ))
                     await client.connect()
+                    if not await client.is_user_authorized():
+                        QTimer.singleShot(0, lambda: self._on_log("SpamBot: аккаунт не авторизован", "err"))
+                        await client.disconnect()
+                        return
                     await client.send_message("@SpamBot", text)
-                    await asyncio.sleep(4)
+                    await asyncio.sleep(5)
                     reply = ""
                     btns = []
                     async for m in client.iter_messages("@SpamBot", limit=5):
-                        if not m.out and m.message and not reply:
+                        if not m.out and m.message:
                             reply = m.message
                             if m.reply_markup:
                                 try:
@@ -3306,11 +3325,11 @@ class MainWindow(QMainWindow):
                             break
                     await client.disconnect()
                     name = acc.get("name", acc["phone"])
-                    reply_snap = reply
-                    btns_snap = list(btns)
-                    acc_snap = acc
-                    QTimer.singleShot(0, lambda: self._on_log(f"SpamBot [{name}]: {reply_snap[:120]}", "info"))
-                    QTimer.singleShot(0, lambda: self._apply_spambot_reply(acc_snap, reply_snap, btns_snap))
+                    r = reply
+                    b = list(btns)
+                    a = acc
+                    QTimer.singleShot(0, lambda: self._on_log(f"SpamBot [{name}]: {r[:120]}", "info"))
+                    QTimer.singleShot(0, lambda: self._apply_spambot_reply(a, r, b))
                 except Exception as ex:
                     err = str(ex)
                     QTimer.singleShot(0, lambda: self._on_log(f"SpamBot ошибка: {err}", "err"))
@@ -3319,9 +3338,11 @@ class MainWindow(QMainWindow):
 
     def _apply_spambot_reply(self, acc, reply, btns):
         entries = getattr(self, "_spamblock_log", [])
+        phone = acc.get("phone", "")
         matched = False
         for i, en in enumerate(entries):
-            if en.get("acc") == acc:
+            en_acc = en.get("acc") or {}
+            if en_acc.get("phone", "") == phone:
                 entries[i]["reply"] = reply
                 entries[i]["buttons"] = btns
                 self._on_spamblock_selected(i)
