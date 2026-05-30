@@ -9,7 +9,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-APP_VERSION = "2.3"
+APP_VERSION = "2.0"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/Lagos.py"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
 
@@ -64,8 +64,14 @@ SESSION_DIR = APP_DIR / "sessions"
 SESSION_DIR.mkdir(exist_ok=True)
 
 
-def _set_session_wal(phone):
-    path = SESSION_DIR / f"{phone.replace('+', '')}.session"
+def _set_session_wal(phone, chat_mode=False):
+    base = phone.replace("+", "")
+    path = SESSION_DIR / (base + ("_chat" if chat_mode else "") + ".session")
+    if chat_mode and not path.exists():
+        src = SESSION_DIR / f"{base}.session"
+        if src.exists():
+            import shutil
+            shutil.copy2(str(src), str(path))
     if path.exists():
         try:
             con = sqlite3.connect(str(path), timeout=30)
@@ -354,8 +360,9 @@ def save_data(data):
     DATA_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def build_client(acc, proxy=None):
-    sess = str(SESSION_DIR / acc["phone"].replace("+", ""))
+def build_client(acc, proxy=None, chat_mode=False):
+    phone = acc["phone"].replace("+", "")
+    sess = str(SESSION_DIR / (phone + ("_chat" if chat_mode else "")))
     kwargs = {
         "connection_retries": 5,
         "retry_delay": 2,
@@ -1206,24 +1213,31 @@ class ChatLoader(QObject):
         loop.run_until_complete(self._load())
 
     async def _load(self):
-        try:
-            client = build_client(self.account, self.proxy)
-            await client.connect()
-            if not await client.is_user_authorized():
-                self.error_signal.emit("Аккаунт не авторизован")
+        _set_session_wal(self.account["phone"], chat_mode=True)
+        for attempt in range(5):
+            try:
+                client = build_client(self.account, self.proxy, chat_mode=True)
+                await client.connect()
+                if not await client.is_user_authorized():
+                    self.error_signal.emit("Аккаунт не авторизован")
+                    await client.disconnect()
+                    return
+                msgs = []
+                async for msg in client.iter_messages(self.recipient, limit=50):
+                    if msg.message:
+                        sender = "Я" if msg.out else self.recipient
+                        ts = msg.date.strftime("%d.%m %H:%M")
+                        msgs.append({"sender": sender, "text": msg.message, "ts": ts, "out": msg.out})
+                msgs.reverse()
                 await client.disconnect()
+                self.messages_loaded.emit(self.recipient, msgs)
                 return
-            msgs = []
-            async for msg in client.iter_messages(self.recipient, limit=50):
-                if msg.message:
-                    sender = "Я" if msg.out else self.recipient
-                    ts = msg.date.strftime("%d.%m %H:%M")
-                    msgs.append({"sender": sender, "text": msg.message, "ts": ts, "out": msg.out})
-            msgs.reverse()
-            await client.disconnect()
-            self.messages_loaded.emit(self.recipient, msgs)
-        except Exception as ex:
-            self.error_signal.emit(str(ex))
+            except Exception as ex:
+                if "database is locked" in str(ex).lower() and attempt < 4:
+                    await asyncio.sleep(3)
+                else:
+                    self.error_signal.emit(str(ex))
+                    return
 
 
 class StatCard(QFrame):
@@ -1368,6 +1382,7 @@ class MainWindow(QMainWindow):
         self.data = load_data()
         self._workers = {}
         self._worker_threads = {}
+        self._shared_clients = {}
         self._worker_totals = {}
         self._worker_paused = {}
         self._ok_count = 0
