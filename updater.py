@@ -2,12 +2,19 @@ import sys
 import subprocess
 import urllib.request
 from pathlib import Path
-
 from PyQt5.QtWidgets import QMessageBox
 
-APP_VERSION = "4.0"
-GITHUB_RAW_URL     = "https://raw.githubusercontent.com/sh1n7373/something/main/Lagos.py"
+APP_VERSION = "4.1"
+GITHUB_BASE_URL    = "https://raw.githubusercontent.com/sh1n7373/something/main/"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
+GITHUB_FILES = [
+    "app.py",
+    "storage.py",
+    "tg_client.py",
+    "theme.py",
+    "updater.py",
+    "widgets.py",
+]
 
 _pending_version = None
 
@@ -41,27 +48,13 @@ def show_update_dialog(parent, style):
 
 def _do_update(parent):
     try:
-        with urllib.request.urlopen(GITHUB_RAW_URL, timeout=30) as r:
-            new_code = r.read()
-
-        if getattr(sys, "frozen", False):
-            current_dir = Path(sys.executable).parent
-            (current_dir / "Lagos.py").write_bytes(new_code)
-            try:
-                Path(sys.executable).unlink()
-            except OSError:
-                pass
-            QMessageBox.information(
-                parent, "Обновление загружено",
-                "Lagos.py обновлён!\n\nЗапусти install.bat чтобы пересобрать приложение."
-            )
-            sys.exit(0)
-        else:
-            current = Path(sys.argv[0]).resolve()
-            current.with_suffix(".bak").write_bytes(current.read_bytes())
-            current.write_bytes(new_code)
-            subprocess.Popen([sys.executable, str(current)])
-            sys.exit(0)
-
+        base = Path(sys.argv[0]).resolve().parent
+        for filename in GITHUB_FILES:
+            url = GITHUB_BASE_URL + filename
+            with urllib.request.urlopen(url, timeout=30) as r:
+                data = r.read()
+            (base / filename).write_bytes(data)
+        subprocess.Popen([sys.executable, str(base / "app.py")])
+        sys.exit(0)
     except Exception as e:
         QMessageBox.critical(parent, "Ошибка обновления", str(e))
