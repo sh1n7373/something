@@ -9,7 +9,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-APP_VERSION = "2.6"
+APP_VERSION = "2.7"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/Lagos.py"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
 
@@ -2997,9 +2997,10 @@ class MainWindow(QMainWindow):
 
         self._spam_btns_frame = QFrame()
         self._spam_btns_frame.setObjectName("card")
+        self._spam_btns_frame.setMinimumHeight(80)
         spam_btns_lay = QVBoxLayout(self._spam_btns_frame)
-        spam_btns_lay.setContentsMargins(12, 12, 12, 12)
-        spam_btns_lay.setSpacing(8)
+        spam_btns_lay.setContentsMargins(16, 16, 16, 16)
+        spam_btns_lay.setSpacing(10)
         self._spam_btns_layout = spam_btns_lay
         right.addWidget(self._spam_btns_frame)
 
@@ -3037,6 +3038,8 @@ class MainWindow(QMainWindow):
                 w.deleteLater()
         for btn_text in e.get("buttons", []):
             b = AnimatedButton(btn_text)
+            b.setMinimumHeight(44)
+            b.setStyleSheet(b.styleSheet() + "font-size: 14px; font-weight: 600;")
             b.clicked.connect(lambda _, t=btn_text, en=e: self._send_spambot_reply(t, en))
             self._spam_btns_layout.addWidget(b)
         if not e.get("buttons"):
