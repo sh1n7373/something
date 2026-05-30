@@ -8,7 +8,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-APP_VERSION = "2.0"
+APP_VERSION = "2.1"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/Lagos.py"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
 
