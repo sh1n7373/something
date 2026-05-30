@@ -8,7 +8,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-APP_VERSION = "2.5"
+APP_VERSION = "2.0"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/Lagos.py"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
 
@@ -1262,6 +1262,26 @@ def styled_combo():
         p.end()
 
 
+class ProxyStatusDot(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(10, 10)
+        self._color = QColor("#3a4a68")
+
+    def set_status(self, status):
+        colors = {"ok": "#6a9e80", "err": "#b06070", "checking": "#a08858"}
+        self._color = QColor(colors.get(status, "#3a4a68"))
+        self.update()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        p.setBrush(self._color)
+        p.drawEllipse(self.rect())
+        p.end()
+
+
 class ProxyRowWidget(QWidget):
     def __init__(self, proxy_data, idx, parent=None):
         super().__init__(parent)
@@ -1368,7 +1388,7 @@ class MainWindow(QMainWindow):
             ("Аккаунты", 0),
             ("Теги", 1),
             ("Пасты", 2),
-            ("Отписи", 3),
+            ("Спам", 3),
             ("Логи", 4),
             ("Прокси", 5),
             ("Чаты", 6),
@@ -1418,7 +1438,7 @@ class MainWindow(QMainWindow):
         topbar_lay.addWidget(self._pause_btn)
         topbar_lay.addSpacing(8)
 
-        self._run_btn = AnimatedButton("Начать отписи")
+        self._run_btn = AnimatedButton("Начать спам")
         self._run_btn.setFixedHeight(32)
         self._run_btn.setMinimumWidth(160)
         self._run_btn.clicked.connect(self._toggle_send)
@@ -1523,7 +1543,7 @@ class MainWindow(QMainWindow):
         hdr.setObjectName("header")
         lay.addWidget(hdr)
 
-        sub = QLabel("Создавайте отдельные базы для каждого потока отписи")
+        sub = QLabel("Создавайте отдельные базы для каждого потока спама")
         sub.setObjectName("subheader")
         lay.addWidget(sub)
 
@@ -2245,7 +2265,7 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(36, 36, 36, 0)
         outer.setSpacing(0)
 
-        hdr = QLabel("Отписи")
+        hdr = QLabel("Спам")
         hdr.setObjectName("header")
         outer.addWidget(hdr)
         outer.addSpacing(12)
@@ -2731,7 +2751,7 @@ class MainWindow(QMainWindow):
         if any_running:
             for idx in list(self._workers.keys()):
                 self._stop_worker(idx)
-            self._run_btn.setText("Начать отписи")
+            self._run_btn.setText("Начать спам")
         else:
             for idx in range(len(self._worker_cards)):
                 self._start_worker(idx)
@@ -2860,28 +2880,39 @@ class MainWindow(QMainWindow):
         self._failed_reasons_view.setPlainText(reasons_text)
 
 
+_pending_update_version = None
+
+
 def check_for_update(parent_widget=None):
+    global _pending_update_version
     try:
-        with urllib.request.urlopen(GITHUB_VERSION_URL, timeout=5) as r:
+        with urllib.request.urlopen(GITHUB_VERSION_URL, timeout=8) as r:
             latest = r.read().decode().strip()
-        if latest == APP_VERSION:
+        if latest.strip() == APP_VERSION.strip():
             return
-        msg = QMessageBox(parent_widget)
-        msg.setWindowTitle("Доступно обновление")
-        msg.setText(f"Новая версия: {latest}\nТекущая: {APP_VERSION}\n\nОбновить сейчас?")
-        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        msg.setStyleSheet(STYLE)
-        if msg.exec_() == QMessageBox.Yes:
-            _do_update()
+        _pending_update_version = latest
     except Exception:
         pass
+
+
+def _show_update_dialog(parent_widget=None):
+    latest = _pending_update_version
+    if not latest:
+        return
+    msg = QMessageBox(parent_widget)
+    msg.setWindowTitle("Доступно обновление")
+    msg.setText(f"Новая версия: {latest}\nТекущая: {APP_VERSION}\n\nОбновить сейчас?")
+    msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+    msg.setStyleSheet(STYLE)
+    if msg.exec_() == QMessageBox.Yes:
+        _do_update()
 
 
 def _do_update():
     try:
         current = Path(sys.argv[0]).resolve()
         backup = current.with_suffix(".py.bak")
-        with urllib.request.urlopen(GITHUB_RAW_URL, timeout=15) as r:
+        with urllib.request.urlopen(GITHUB_RAW_URL, timeout=30) as r:
             new_code = r.read()
         backup.write_bytes(current.read_bytes())
         current.write_bytes(new_code)
@@ -2923,7 +2954,14 @@ if __name__ == "__main__":
         if Path(icon_file).exists():
             win.setWindowIcon(QIcon(icon_file))
         win.show()
+        def _poll_update():
+            if _pending_update_version:
+                _show_update_dialog(win)
+            else:
+                QTimer.singleShot(2000, _poll_update)
+
         threading.Thread(target=lambda: check_for_update(win), daemon=True).start()
+        QTimer.singleShot(3000, _poll_update)
         sys.exit(app.exec_())
     except Exception:
         traceback.print_exc()
