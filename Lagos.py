@@ -9,7 +9,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-APP_VERSION = "3.5"
+APP_VERSION = "3.6"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/Lagos.py"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
 
@@ -3115,27 +3115,16 @@ class MainWindow(QMainWindow):
         self._refresh_spamblock_page()
 
     def _refresh_spamblock_page(self):
-        if not hasattr(self, "_spam_list_widget"):
+        if not hasattr(self, "_spam_acc_combo"):
             return
-        if hasattr(self, "_spam_acc_combo"):
-            cur = self._spam_acc_combo.currentIndex()
-            self._spam_acc_combo.clear()
-            for acc in self.data.get("accounts", []):
-                name = acc.get("name", acc["phone"])
-                un = f"@{acc['username']}" if acc.get("username") else ""
-                self._spam_acc_combo.addItem(f"{name}  {un}  {acc['phone']}")
-            if cur >= 0:
-                self._spam_acc_combo.setCurrentIndex(min(cur, self._spam_acc_combo.count() - 1))
-        self._spam_list_widget.clear()
-        for e in getattr(self, "_spamblock_log", []):
-            low = (e["reply"] or "").lower()
-            freed = any(w in low for w in ("free", "no limits", "свободен", "ограничений", "bird"))
-            status = "СНЯТ" if freed else "БЛОК"
-            color = "#6a9e80" if freed else "#b06070"
-            item = QListWidgetItem(f"  [{e['time']}]  {e['acc_name']}  -  {e['stopped_at']}  [{status}]")
-            item.setForeground(QColor(color))
-            item.setData(Qt.UserRole, e)
-            self._spam_list_widget.addItem(item)
+        cur = self._spam_acc_combo.currentIndex()
+        self._spam_acc_combo.clear()
+        for acc in self.data.get("accounts", []):
+            name = acc.get("name", acc["phone"])
+            un = f"@{acc['username']}" if acc.get("username") else ""
+            self._spam_acc_combo.addItem(f"{name}  {un}  {acc['phone']}")
+        if cur >= 0:
+            self._spam_acc_combo.setCurrentIndex(min(cur, self._spam_acc_combo.count() - 1))
 
     def _build_spamblock_page(self):
         w = self._mk_page()
@@ -3171,20 +3160,6 @@ class MainWindow(QMainWindow):
 
         content = QHBoxLayout()
         content.setSpacing(20)
-
-        left = QVBoxLayout()
-        lbl_l = QLabel("АККАУНТЫ")
-        lbl_l.setObjectName("section")
-        left.addWidget(lbl_l)
-
-        self._spam_list_widget = QListWidget()
-        self._spam_list_widget.currentRowChanged.connect(self._on_spamblock_selected)
-        left.addWidget(self._spam_list_widget)
-
-        clear_btn = AnimatedButton("Очистить")
-        clear_btn.clicked.connect(self._clear_spamblock_log)
-        left.addWidget(clear_btn)
-        content.addLayout(left, 1)
 
         right = QVBoxLayout()
         right.setSpacing(10)
@@ -3245,7 +3220,7 @@ class MainWindow(QMainWindow):
         right.addWidget(start_btn)
 
         right.addStretch()
-        content.addLayout(right, 2)
+        content.addLayout(right, 1)
         lay.addLayout(content)
         return w
 
@@ -3328,18 +3303,48 @@ class MainWindow(QMainWindow):
                     await client.disconnect()
                     name = acc.get("name", acc["phone"])
                     self._on_log(f"SpamBot [{name}]: {reply[:120]}", "info")
-                    cur_row = self._spam_list_widget.currentRow()
                     entries = getattr(self, "_spamblock_log", [])
-                    if 0 <= cur_row < len(entries):
-                        entries[cur_row]["reply"] = reply
-                        entries[cur_row]["buttons"] = btns
-                        r = cur_row
-                        QTimer.singleShot(0, lambda: self._on_spamblock_selected(r))
-                        QTimer.singleShot(0, self._refresh_spamblock_page)
+                    for i, en in enumerate(entries):
+                        if en.get("acc") == acc:
+                            entries[i]["reply"] = reply
+                            entries[i]["buttons"] = btns
+                            r = i
+                            QTimer.singleShot(0, lambda ri=r: self._on_spamblock_selected(ri))
+                            QTimer.singleShot(0, self._refresh_spamblock_page)
+                            break
+                    else:
+                        self._update_spambot_reply(reply, btns)
                 except Exception as ex:
                     self._on_log(f"SpamBot ошибка: {ex}", "err")
             loop.run_until_complete(_inner())
         threading.Thread(target=_run, daemon=True).start()
+
+    def _update_spambot_reply(self, reply, btns):
+        self._spam_reply_lbl.setPlainText(reply)
+        for i in reversed(range(self._spam_btns_layout.count())):
+            w = self._spam_btns_layout.itemAt(i).widget()
+            if w:
+                w.deleteLater()
+        if btns:
+            for btn_text in btns:
+                b = AnimatedButton(btn_text)
+                b.setMinimumHeight(44)
+                b.setStyleSheet(b.styleSheet() + "font-size: 14px; font-weight: 600;")
+                b.clicked.connect(lambda _, t=btn_text: self._send_manual_reply(t))
+                self._spam_btns_layout.addWidget(b)
+        else:
+            no_btn = QLabel("Нет кнопок от Spam info bot")
+            no_btn.setStyleSheet("color: #4e5a78; font-size: 12px;")
+            self._spam_btns_layout.addWidget(no_btn)
+
+    def _send_manual_reply(self, text):
+        acc_idx = self._spam_acc_combo.currentIndex()
+        accounts = self.data.get("accounts", [])
+        if acc_idx < 0 or acc_idx >= len(accounts):
+            return
+        acc = accounts[acc_idx]
+        proxy = self._get_app_proxy()
+        self._do_spambot_send(acc, text, proxy)
 
     def _clear_spamblock_log(self):
         self._spamblock_log = []
