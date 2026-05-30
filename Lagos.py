@@ -9,7 +9,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-APP_VERSION = "3.6"
+APP_VERSION = "3.7"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/Lagos.py"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
 
@@ -2935,6 +2935,8 @@ class MainWindow(QMainWindow):
                 data_idx = item.data(Qt.UserRole)
                 if 0 <= data_idx < len(self.data["pastes"]):
                     selected.append(self.data["pastes"][data_idx])
+        if not selected and paste_list_w.count() == 0:
+            selected = [p for p in self.data.get("pastes", []) if p.strip()]
         return selected
 
     def _toggle_worker(self, idx):
@@ -3288,36 +3290,44 @@ class MainWindow(QMainWindow):
                     await asyncio.sleep(4)
                     reply = ""
                     btns = []
-                    async for m in client.iter_messages("@SpamBot", limit=3):
-                        if m.message and not reply:
+                    async for m in client.iter_messages("@SpamBot", limit=5):
+                        if not m.out and m.message and not reply:
                             reply = m.message
-                        if m.reply_markup:
-                            try:
-                                for row2 in m.reply_markup.rows:
-                                    for b in row2.buttons:
-                                        if hasattr(b, "text"):
-                                            btns.append(b.text)
-                            except Exception:
-                                pass
-                        break
+                            if m.reply_markup:
+                                try:
+                                    for row2 in m.reply_markup.rows:
+                                        for b in row2.buttons:
+                                            if hasattr(b, "text"):
+                                                btns.append(b.text)
+                                except Exception:
+                                    pass
+                            break
                     await client.disconnect()
                     name = acc.get("name", acc["phone"])
-                    self._on_log(f"SpamBot [{name}]: {reply[:120]}", "info")
-                    entries = getattr(self, "_spamblock_log", [])
-                    for i, en in enumerate(entries):
-                        if en.get("acc") == acc:
-                            entries[i]["reply"] = reply
-                            entries[i]["buttons"] = btns
-                            r = i
-                            QTimer.singleShot(0, lambda ri=r: self._on_spamblock_selected(ri))
-                            QTimer.singleShot(0, self._refresh_spamblock_page)
-                            break
-                    else:
-                        self._update_spambot_reply(reply, btns)
+                    reply_snap = reply
+                    btns_snap = list(btns)
+                    acc_snap = acc
+                    QTimer.singleShot(0, lambda: self._on_log(f"SpamBot [{name}]: {reply_snap[:120]}", "info"))
+                    QTimer.singleShot(0, lambda: self._apply_spambot_reply(acc_snap, reply_snap, btns_snap))
                 except Exception as ex:
-                    self._on_log(f"SpamBot ошибка: {ex}", "err")
+                    err = str(ex)
+                    QTimer.singleShot(0, lambda: self._on_log(f"SpamBot ошибка: {err}", "err"))
             loop.run_until_complete(_inner())
         threading.Thread(target=_run, daemon=True).start()
+
+    def _apply_spambot_reply(self, acc, reply, btns):
+        entries = getattr(self, "_spamblock_log", [])
+        matched = False
+        for i, en in enumerate(entries):
+            if en.get("acc") == acc:
+                entries[i]["reply"] = reply
+                entries[i]["buttons"] = btns
+                self._on_spamblock_selected(i)
+                self._refresh_spamblock_page()
+                matched = True
+                break
+        if not matched:
+            self._update_spambot_reply(reply, btns)
 
     def _update_spambot_reply(self, reply, btns):
         self._spam_reply_lbl.setPlainText(reply)
