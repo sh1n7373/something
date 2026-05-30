@@ -1388,7 +1388,7 @@ class MainWindow(QMainWindow):
             ("Аккаунты", 0),
             ("Теги", 1),
             ("Пасты", 2),
-            ("Спам", 3),
+            ("Отписи", 3),
             ("Логи", 4),
             ("Прокси", 5),
             ("Чаты", 6),
@@ -1438,7 +1438,7 @@ class MainWindow(QMainWindow):
         topbar_lay.addWidget(self._pause_btn)
         topbar_lay.addSpacing(8)
 
-        self._run_btn = AnimatedButton("Начать спам")
+        self._run_btn = AnimatedButton("Начать отписи")
         self._run_btn.setFixedHeight(32)
         self._run_btn.setMinimumWidth(160)
         self._run_btn.clicked.connect(self._toggle_send)
@@ -1543,7 +1543,7 @@ class MainWindow(QMainWindow):
         hdr.setObjectName("header")
         lay.addWidget(hdr)
 
-        sub = QLabel("Создавайте отдельные базы для каждого потока спама")
+        sub = QLabel("Создавайте отдельные базы для каждого потока отписок")
         sub.setObjectName("subheader")
         lay.addWidget(sub)
 
@@ -2265,7 +2265,7 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(36, 36, 36, 0)
         outer.setSpacing(0)
 
-        hdr = QLabel("Спам")
+        hdr = QLabel("Отписи")
         hdr.setObjectName("header")
         outer.addWidget(hdr)
         outer.addSpacing(12)
@@ -2751,7 +2751,7 @@ class MainWindow(QMainWindow):
         if any_running:
             for idx in list(self._workers.keys()):
                 self._stop_worker(idx)
-            self._run_btn.setText("Начать спам")
+            self._run_btn.setText("Начать отписи")
         else:
             for idx in range(len(self._worker_cards)):
                 self._start_worker(idx)
