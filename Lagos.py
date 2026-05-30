@@ -8,7 +8,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-APP_VERSION = "2.0"
+APP_VERSION = "2.1"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/Lagos.py"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
 
@@ -22,7 +22,7 @@ try:
     )
     from PyQt5.QtCore import (
         Qt, QTimer, QTime, QPropertyAnimation, QParallelAnimationGroup,
-        QEasingCurve, pyqtSignal, pyqtProperty, QRect, QPointF, QObject
+        QEasingCurve, pyqtSignal, pyqtProperty, QRect, QPointF, QObject, QSize
     )
     from PyQt5.QtGui import (
         QPainter, QColor, QLinearGradient, QPen, QFont, QIcon, QPixmap
@@ -51,8 +51,15 @@ try:
 except ImportError:
     SOCKS_AVAILABLE = False
 
-DATA_FILE = Path("data.json")
-SESSION_DIR = Path("sessions")
+def _get_app_dir():
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent
+    else:
+        return Path(__file__).parent
+
+APP_DIR = _get_app_dir()
+DATA_FILE = APP_DIR / "data.json"
+SESSION_DIR = APP_DIR / "sessions"
 SESSION_DIR.mkdir(exist_ok=True)
 
 STYLE = """
@@ -1039,6 +1046,7 @@ class SenderWorker(QObject):
     finished_signal = pyqtSignal()
     failed_signal = pyqtSignal(str)
     failed_detail_signal = pyqtSignal(str, str)
+    current_tag_signal = pyqtSignal(int, str)
 
     def __init__(self, account, recipients, pastes, interval_min, pastes_per_recipient,
                  proxy=None, tag_interval_min=0, worker_id=0):
@@ -1114,6 +1122,7 @@ class SenderWorker(QObject):
                     return
 
             prev_tag = tag
+            self.current_tag_signal.emit(self.worker_id, tag)
 
             for paste in pastes_to_use:
                 if self._stop:
@@ -1146,8 +1155,9 @@ class SenderWorker(QObject):
                     self.failed_detail_signal.emit(tag, str(ex))
                 self._done += 1
                 self.progress_signal.emit(self._done, total)
-                if self._done < total and self.tag_interval_min == 0:
-                    await self._interruptible_sleep(self.interval_min * 60)
+                if self._done < total:
+                    if self.tag_interval_min == 0 and self.interval_min > 0:
+                        await self._interruptible_sleep(self.interval_min * 60)
 
         await client.disconnect()
 
@@ -1243,23 +1253,6 @@ def styled_combo():
     cb = QComboBox()
     cb.view().setStyleSheet(COMBO_VIEW_STYLE)
     return cb
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedSize(10, 10)
-        self._color = QColor("#3a4a68")
-
-    def set_status(self, status):
-        colors = {"ok": "#6a9e80", "err": "#b06070", "checking": "#a08858"}
-        self._color = QColor(colors.get(status, "#3a4a68"))
-        self.update()
-
-    def paintEvent(self, e):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        p.setPen(Qt.NoPen)
-        p.setBrush(self._color)
-        p.drawEllipse(self.rect())
-        p.end()
 
 
 class ProxyStatusDot(QWidget):
@@ -1346,6 +1339,8 @@ class MainWindow(QMainWindow):
         self.data = load_data()
         self._workers = {}
         self._worker_threads = {}
+        self._worker_totals = {}
+        self._worker_paused = {}
         self._ok_count = 0
         self._err_count = 0
         self._paused = False
@@ -2025,7 +2020,7 @@ class MainWindow(QMainWindow):
                 row_widget.set_status(status)
             row_widget.set_active(i == active_idx)
             item = QListWidgetItem(self.proxy_list)
-            item.setSizeHint(row_widget.sizeHint())
+            item.setSizeHint(QSize(row_widget.sizeHint().width(), 42))
             self.proxy_list.addItem(item)
             self.proxy_list.setItemWidget(item, row_widget)
             self._proxy_row_widgets.append(row_widget)
@@ -2075,10 +2070,18 @@ class MainWindow(QMainWindow):
         if row < 0:
             return
         self.data["proxies"].pop(row)
-        if self.data.get("active_proxy_idx", -1) == row:
+        active = self.data.get("active_proxy_idx", -1)
+        if active == row:
             self.data["active_proxy_idx"] = -1
-        if row in self._proxy_status:
-            del self._proxy_status[row]
+        elif active > row:
+            self.data["active_proxy_idx"] = active - 1
+        new_status = {}
+        for k, v in self._proxy_status.items():
+            if k < row:
+                new_status[k] = v
+            elif k > row:
+                new_status[k - 1] = v
+        self._proxy_status = new_status
         save_data(self.data)
         self._refresh_proxies()
 
@@ -2545,11 +2548,28 @@ class MainWindow(QMainWindow):
         row.addStretch()
         card_lay.addLayout(row)
 
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
         start_btn = AnimatedButton(f"Запустить поток {idx + 1}")
         start_btn.setMinimumHeight(36)
         start_btn.setFixedWidth(220)
         start_btn.clicked.connect(lambda checked, i=idx: self._toggle_worker(i))
-        card_lay.addWidget(start_btn)
+        btn_row.addWidget(start_btn)
+
+        pause_btn = AnimatedButton("Пауза")
+        pause_btn.setMinimumHeight(36)
+        pause_btn.setFixedWidth(110)
+        pause_btn.setEnabled(False)
+        pause_btn.clicked.connect(lambda checked, i=idx: self._toggle_worker_pause(i))
+        btn_row.addWidget(pause_btn)
+
+        current_tag_lbl = QLabel("")
+        current_tag_lbl.setStyleSheet("color: #4e5a78; font-size: 11px; background: transparent;")
+        btn_row.addWidget(current_tag_lbl)
+        btn_row.addStretch()
+
+        card_lay.addLayout(btn_row)
 
         self._worker_cards_layout.addWidget(card)
         self._worker_cards.append({
@@ -2559,6 +2579,8 @@ class MainWindow(QMainWindow):
             "paste_list": paste_list_w,
             "rec_combo": rec_combo,
             "start_btn": start_btn,
+            "pause_btn": pause_btn,
+            "current_tag_lbl": current_tag_lbl,
             "recipients": None,
         })
 
@@ -2578,7 +2600,7 @@ class MainWindow(QMainWindow):
     def _remove_worker_card(self, idx):
         if idx >= len(self._worker_cards):
             return
-        if idx in self._workers:
+        if idx in self._workers and self._workers[idx] is not None:
             self._workers[idx].stop()
         card_data = self._worker_cards[idx]
         card_data["card"].setParent(None)
@@ -2649,9 +2671,15 @@ class MainWindow(QMainWindow):
         worker.finished_signal.connect(lambda i=idx: self._on_worker_finished(i))
         worker.failed_signal.connect(self._on_failed)
         worker.failed_detail_signal.connect(self._on_failed_detail)
+        worker.current_tag_signal.connect(self._on_worker_current_tag)
 
         self._workers[idx] = worker
-        self._total_messages += len(recipients) * len(selected_pastes)
+        self._total_messages = sum(
+            len(self._worker_cards[i]["recipients"] or []) * len(self._get_worker_selected_pastes(i))
+            for i in range(len(self._worker_cards))
+            if i in self._workers and self._workers.get(i) is not None
+        ) + len(recipients) * len(selected_pastes)
+        self._worker_totals[idx] = len(recipients) * len(selected_pastes)
         self.stat_total.set_value(self._total_messages)
         self.stat_left.set_value(self._total_messages - self._done_messages)
         self.progress_bar.setMaximum(self._total_messages)
@@ -2663,6 +2691,10 @@ class MainWindow(QMainWindow):
         t.start()
 
         card_data["start_btn"].setText(f"Остановить поток {idx + 1}")
+        card_data["pause_btn"].setEnabled(True)
+        card_data["pause_btn"].setText("Пауза")
+        card_data["current_tag_lbl"].setText("")
+        self._worker_paused[idx] = False
         proxy_info = f"  прокси: {proxy['type'].upper()} {proxy['host']}:{proxy['port']}" if proxy else ""
         self._on_log(
             f"[W{idx+1}] Запущен  {len(recipients)} тегов  {len(selected_pastes)} past{proxy_info}",
@@ -2673,22 +2705,55 @@ class MainWindow(QMainWindow):
         if idx in self._workers and self._workers[idx]:
             self._workers[idx].stop()
             self._workers[idx] = None
+        self._worker_paused[idx] = False
         if idx < len(self._worker_cards):
             self._worker_cards[idx]["start_btn"].setText(f"Запустить поток {idx + 1}")
+            self._worker_cards[idx]["pause_btn"].setEnabled(False)
+            self._worker_cards[idx]["pause_btn"].setText("Пауза")
+            self._worker_cards[idx]["current_tag_lbl"].setText("")
         self._on_log(f"[W{idx+1}] Остановлен", "warn")
+
+    def _toggle_worker_pause(self, idx):
+        if idx not in self._workers or self._workers[idx] is None:
+            return
+        is_paused = self._worker_paused.get(idx, False)
+        if is_paused:
+            self._workers[idx].resume()
+            self._worker_paused[idx] = False
+            if idx < len(self._worker_cards):
+                self._worker_cards[idx]["pause_btn"].setText("Пауза")
+            self._on_log(f"[W{idx+1}] Возобновлён", "info")
+        else:
+            self._workers[idx].pause()
+            self._worker_paused[idx] = True
+            if idx < len(self._worker_cards):
+                self._worker_cards[idx]["pause_btn"].setText("Продолжить")
+            self._on_log(f"[W{idx+1}] На паузе", "warn")
+
+    def _on_worker_current_tag(self, worker_id, tag):
+        if worker_id < len(self._worker_cards):
+            lbl = self._worker_cards[worker_id].get("current_tag_lbl")
+            if lbl:
+                lbl.setText(f"→ {tag}")
 
     def _on_worker_progress(self, worker_idx, done_delta, total_delta):
         self._done_messages = sum(
-            getattr(w, '_done', 0) for w in self._workers.values() if w
+            getattr(w, '_done', 0) for w in self._workers.values() if w is not None
         )
+        total = sum(self._worker_totals.values()) if self._worker_totals else self._total_messages
+        self.progress_bar.setMaximum(total)
         self.progress_bar.setValue(self._done_messages)
-        self._on_progress(self._done_messages, self._total_messages)
+        self._on_progress(self._done_messages, total)
 
     def _on_worker_finished(self, idx):
         if idx in self._workers:
             self._workers[idx] = None
+        self._worker_paused[idx] = False
         if idx < len(self._worker_cards):
             self._worker_cards[idx]["start_btn"].setText(f"Запустить поток {idx + 1}")
+            self._worker_cards[idx]["pause_btn"].setEnabled(False)
+            self._worker_cards[idx]["pause_btn"].setText("Пауза")
+            self._worker_cards[idx]["current_tag_lbl"].setText("")
         self._on_log(f"[W{idx+1}] Завершён", "ok")
         all_done = all(w is None for w in self._workers.values())
         if all_done:
@@ -2698,9 +2763,9 @@ class MainWindow(QMainWindow):
 
     def _on_finished_all(self):
         if self._failed_recipients:
-            out = Path("failed_recipients.txt")
+            out = (APP_DIR / "failed_recipients.txt").resolve()
             out.write_text("\n".join(self._failed_recipients), encoding="utf-8")
-            self._on_log(f"Неудачных: {len(self._failed_recipients)}, сохранено в failed_recipients.txt", "warn")
+            self._on_log(f"Неудачных: {len(self._failed_recipients)}, сохранено в {out}", "warn")
         self._on_log("Все потоки завершены", "ok")
         self._total_messages = 0
         self._done_messages = 0
@@ -2983,7 +3048,7 @@ if __name__ == "__main__":
         msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
         print(msg, file=sys.stderr)
         try:
-            Path("crash.log").write_text(msg, encoding="utf-8")
+            (APP_DIR / "crash.log").write_text(msg, encoding="utf-8")
         except Exception:
             pass
         try:
@@ -3015,6 +3080,6 @@ if __name__ == "__main__":
     except Exception:
         traceback.print_exc()
         try:
-            Path("crash.log").write_text(traceback.format_exc(), encoding="utf-8")
+            (APP_DIR / "crash.log").write_text(traceback.format_exc(), encoding="utf-8")
         except Exception:
             pass
