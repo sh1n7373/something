@@ -9,7 +9,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-APP_VERSION = "3.4"
+APP_VERSION = "3.5"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/Lagos.py"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
 
@@ -1339,28 +1339,28 @@ class StatCard(QFrame):
 
 COMBO_VIEW_STYLE = """
     QAbstractItemView {
-        background:
-        color:
-        border: 1px solid
+        background: #141720;
+        color: #dde3f0;
+        border: 1px solid #2a3a5a;
         border-radius: 6px;
         outline: none;
         padding: 2px;
-        selection-background-color:
-        selection-color:
+        selection-background-color: #2a3a5a;
+        selection-color: #e8eef8;
     }
     QAbstractItemView::item {
         padding: 7px 12px;
         min-height: 28px;
         background: transparent;
-        color:
+        color: #a8b8d8;
     }
     QAbstractItemView::item:hover {
-        background:
-        color:
+        background: #1e2538;
+        color: #dde3f0;
     }
     QAbstractItemView::item:selected {
-        background:
-        color:
+        background: #2a3a5a;
+        color: #e8eef8;
     }
 """
 
@@ -2512,15 +2512,20 @@ class MainWindow(QMainWindow):
         if acc_idx < 0 or acc_idx >= len(self.data["accounts"]):
             QMessageBox.warning(self, "Ошибка", "Выберите аккаунт")
             return
-        recipients = self.data.get("recipients", [])
-        if not recipients:
-            QMessageBox.warning(self, "Ошибка", "Нет тегов")
+        all_recs = list(self.data.get("recipients", []))
+        for db_recs in self.data.get("recipient_dbs", {}).values():
+            for r in db_recs:
+                if r not in all_recs:
+                    all_recs.append(r)
+        if not all_recs:
+            QMessageBox.warning(self, "Ошибка", "Нет тегов ни в одной базе")
             return
         self.chat_contacts_list.clear()
         self.chat_view.clear()
         self.chat_status_lbl.setText("Загружено")
         chat_log = self.data.get("chat_log", {})
-        for r in recipients:
+        self._chat_all_recs = all_recs
+        for r in all_recs:
             tag = recipient_tag(r)
             replied = chat_log.get(tag, {}).get("replied", False)
             suffix = "  [ответил]" if replied else ""
@@ -2533,7 +2538,7 @@ class MainWindow(QMainWindow):
         if acc_idx < 0 or acc_idx >= len(self.data["accounts"]):
             return
         acc = self.data["accounts"][acc_idx]
-        recipients = self.data.get("recipients", [])
+        recipients = getattr(self, "_chat_all_recs", self.data.get("recipients", []))
         if row >= len(recipients):
             return
         tag = recipient_tag(recipients[row])
@@ -3014,8 +3019,7 @@ class MainWindow(QMainWindow):
             f"[W{idx+1}] Запущен  {len(recipients)} тегов  {len(selected_pastes)} past{proxy_info}",
             "info"
         )
-
-    def _stop_worker(self, idx):
+        self._run_btn.setText("Остановить все")
         if idx in self._workers and self._workers[idx]:
             self._workers[idx].stop()
             self._workers[idx] = None
@@ -3113,6 +3117,15 @@ class MainWindow(QMainWindow):
     def _refresh_spamblock_page(self):
         if not hasattr(self, "_spam_list_widget"):
             return
+        if hasattr(self, "_spam_acc_combo"):
+            cur = self._spam_acc_combo.currentIndex()
+            self._spam_acc_combo.clear()
+            for acc in self.data.get("accounts", []):
+                name = acc.get("name", acc["phone"])
+                un = f"@{acc['username']}" if acc.get("username") else ""
+                self._spam_acc_combo.addItem(f"{name}  {un}  {acc['phone']}")
+            if cur >= 0:
+                self._spam_acc_combo.setCurrentIndex(min(cur, self._spam_acc_combo.count() - 1))
         self._spam_list_widget.clear()
         for e in getattr(self, "_spamblock_log", []):
             low = (e["reply"] or "").lower()
@@ -3140,6 +3153,21 @@ class MainWindow(QMainWindow):
         sep = QFrame()
         sep.setObjectName("separator")
         lay.addWidget(sep)
+
+        acc_row = QHBoxLayout()
+        lbl_acc = QLabel("АККАУНТ")
+        lbl_acc.setObjectName("section")
+        acc_row.addWidget(lbl_acc)
+        self._spam_acc_combo = styled_combo()
+        self._spam_acc_combo.setFixedHeight(38)
+        self._spam_acc_combo.setMinimumWidth(280)
+        for acc in self.data.get("accounts", []):
+            name = acc.get("name", acc["phone"])
+            un = f"@{acc['username']}" if acc.get("username") else ""
+            self._spam_acc_combo.addItem(f"{name}  {un}  {acc['phone']}")
+        acc_row.addWidget(self._spam_acc_combo)
+        acc_row.addStretch()
+        lay.addLayout(acc_row)
 
         content = QHBoxLayout()
         content.setSpacing(20)
@@ -3254,25 +3282,23 @@ class MainWindow(QMainWindow):
         text = self._spam_manual_edit.text().strip()
         if not text:
             return
-        row = self._spam_list_widget.currentRow()
-        entries = getattr(self, "_spamblock_log", [])
-        if row < 0 or row >= len(entries):
+        acc_idx = self._spam_acc_combo.currentIndex()
+        accounts = self.data.get("accounts", [])
+        if acc_idx < 0 or acc_idx >= len(accounts):
+            QMessageBox.warning(self, "Ошибка", "Выберите аккаунт")
             return
-        acc = entries[row].get("acc")
-        if not acc:
-            return
+        acc = accounts[acc_idx]
         proxy = self._get_app_proxy()
         self._do_spambot_send(acc, text, proxy)
         self._spam_manual_edit.clear()
 
     def _send_spambot_start(self):
-        row = self._spam_list_widget.currentRow()
-        entries = getattr(self, "_spamblock_log", [])
-        if row < 0 or row >= len(entries):
+        acc_idx = self._spam_acc_combo.currentIndex()
+        accounts = self.data.get("accounts", [])
+        if acc_idx < 0 or acc_idx >= len(accounts):
+            QMessageBox.warning(self, "Ошибка", "Выберите аккаунт")
             return
-        acc = entries[row].get("acc")
-        if not acc:
-            return
+        acc = accounts[acc_idx]
         proxy = self._get_app_proxy()
         self._do_spambot_send(acc, "/start", proxy)
 
