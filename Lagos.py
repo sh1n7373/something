@@ -8,7 +8,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-APP_VERSION = "2.2"
+APP_VERSION = "2.0"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/Lagos.py"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
 
@@ -1924,7 +1924,30 @@ class MainWindow(QMainWindow):
         left.addWidget(lbl_list)
 
         self.proxy_list = QListWidget()
-        self.proxy_list.setSpacing(2)
+        self.proxy_list.setSpacing(3)
+        self.proxy_list.setStyleSheet("""
+            QListWidget {
+                background: #141720;
+                border: 1px solid #2c3348;
+                border-radius: 8px;
+                outline: none;
+                padding: 4px;
+            }
+            QListWidget::item {
+                border-radius: 6px;
+                padding: 0px;
+                margin: 1px 2px;
+                background: transparent;
+            }
+            QListWidget::item:selected {
+                background: #1e2a48;
+                border-radius: 6px;
+            }
+            QListWidget::item:hover {
+                background: #1a2236;
+                border-radius: 6px;
+            }
+        """)
         left.addWidget(self.proxy_list)
 
         proxy_btn_row = QHBoxLayout()
