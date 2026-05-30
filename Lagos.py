@@ -8,7 +8,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-APP_VERSION = "2.0"
+APP_VERSION = "2.1"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/Lagos.py"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
 
@@ -17,14 +17,15 @@ try:
         QApplication, QMainWindow, QWidget, QDialog, QVBoxLayout, QHBoxLayout,
         QGridLayout, QLabel, QPushButton, QLineEdit, QTextEdit, QPlainTextEdit,
         QListWidget, QListWidgetItem, QScrollArea, QFrame, QStackedWidget,
-        QAbstractItemView, QMessageBox, QComboBox, QProgressBar, QSizePolicy
+        QAbstractItemView, QMessageBox, QComboBox, QProgressBar, QSizePolicy,
+        QGraphicsEffect
     )
     from PyQt5.QtCore import (
         Qt, QTimer, QTime, QPropertyAnimation, QParallelAnimationGroup,
         QEasingCurve, pyqtSignal, pyqtProperty, QRect, QPointF, QObject
     )
     from PyQt5.QtGui import (
-        QPainter, QColor, QLinearGradient, QPen, QFont, QIcon
+        QPainter, QColor, QLinearGradient, QPen, QFont, QIcon, QPixmap
     )
 except ImportError as e:
     print(f"PyQt5 не установлен: {e}", file=sys.stderr)
@@ -225,9 +226,7 @@ QComboBox::down-arrow {
 QComboBox QAbstractItemView {
     background: #141720;
     border: 1px solid #4a6fa5;
-    border-top: none;
-    border-bottom-left-radius: 8px;
-    border-bottom-right-radius: 8px;
+    border-radius: 6px;
     selection-background-color: #2a3a5a;
     selection-color: #e8eef8;
     color: #dde3f0;
@@ -518,120 +517,254 @@ class StyledTimeEdit(QWidget):
         self._refresh()
 
 
+class SlideEffect(QGraphicsEffect):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._dx = 0.0
+        self._opacity = 1.0
+
+    def _get_dx(self): return self._dx
+    def _set_dx(self, v): self._dx = v; self.update()
+    dx = pyqtProperty(float, _get_dx, _set_dx)
+
+    def _get_opacity(self): return self._opacity
+    def _set_opacity(self, v): self._opacity = v; self.update()
+    opacity = pyqtProperty(float, _get_opacity, _set_opacity)
+
+    def boundingRectFor(self, r):
+        return r
+
+    def draw(self, painter):
+        pixmap, offset = self.sourcePixmap(Qt.LogicalCoordinates)
+        painter.save()
+        painter.setOpacity(self._opacity)
+        painter.drawPixmap(QPointF(offset.x() + self._dx, offset.y()), pixmap)
+        painter.restore()
+
+
+class FadeWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._eff = SlideEffect(self)
+        self.setGraphicsEffect(self._eff)
+
+        self._dx_anim = QPropertyAnimation(self._eff, b"dx")
+        self._dx_anim.setDuration(420)
+        self._dx_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+        self._op_anim = QPropertyAnimation(self._eff, b"opacity")
+        self._op_anim.setDuration(380)
+        self._op_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+        self._group = QParallelAnimationGroup()
+        self._group.addAnimation(self._dx_anim)
+        self._group.addAnimation(self._op_anim)
+
+    def fade_in(self):
+        self._group.stop()
+        self._dx_anim.setStartValue(-52.0)
+        self._dx_anim.setEndValue(0.0)
+        self._op_anim.setStartValue(0.0)
+        self._op_anim.setEndValue(1.0)
+        self._group.start()
+
+
 class SidebarButton(QPushButton):
-    def __init__(self, text, parent=None):
+    def __init__(self, text, icon_char="", parent=None):
         super().__init__(parent)
         self.setCheckable(True)
-        self.setText(f"   {text}")
+        label = f"   {icon_char}  {text}" if icon_char else f"   {text}"
+        self.setText(label)
         self.setFixedHeight(38)
         self.setCursor(Qt.PointingHandCursor)
-        self._active = False
-        self._update_style()
 
-    def setChecked(self, v):
-        super().setChecked(v)
-        self._active = v
-        self._update_style()
+        self._bg = QColor("#141720")
+        self._fg = QColor("#4e5a78")
+        self._indicator = 0.0
 
-    def _update_style(self):
-        if self._active:
-            self.setStyleSheet("""
-                QPushButton {
-                    background: #1e2a48;
-                    color: #6b9ed4;
-                    border: none;
-                    border-left: 3px solid #4a6fa5;
-                    border-radius: 8px;
-                    text-align: left;
-                    padding-left: 14px;
-                    font-size: 13px;
-                    font-weight: 600;
-                }
-            """)
-        else:
-            self.setStyleSheet("""
-                QPushButton {
-                    background: transparent;
-                    color: #4e5a78;
-                    border: none;
-                    border-left: 3px solid transparent;
-                    border-radius: 8px;
-                    text-align: left;
-                    padding-left: 14px;
-                    font-size: 13px;
-                }
-                QPushButton:hover {
-                    background: #1e2334;
-                    color: #8898c8;
-                }
-            """)
+        self._bg_anim = QPropertyAnimation(self, b"_bg_prop")
+        self._bg_anim.setDuration(300)
+        self._bg_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+        self._fg_anim = QPropertyAnimation(self, b"_fg_prop")
+        self._fg_anim.setDuration(300)
+        self._fg_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+        self._ind_anim = QPropertyAnimation(self, b"_ind_prop")
+        self._ind_anim.setDuration(350)
+        self._ind_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+    def _get_bg(self): return self._bg
+    def _set_bg(self, c): self._bg = c; self.update()
+    _bg_prop = pyqtProperty(QColor, _get_bg, _set_bg)
+
+    def _get_fg(self): return self._fg
+    def _set_fg(self, c): self._fg = c; self.update()
+    _fg_prop = pyqtProperty(QColor, _get_fg, _set_fg)
+
+    def _get_ind(self): return self._indicator
+    def _set_ind(self, v): self._indicator = v; self.update()
+    _ind_prop = pyqtProperty(float, _get_ind, _set_ind)
+
+    def _run_anim(self, bg_to, fg_to, ind_to):
+        for a in (self._bg_anim, self._fg_anim, self._ind_anim):
+            a.stop()
+        self._bg_anim.setStartValue(self._bg)
+        self._bg_anim.setEndValue(bg_to)
+        self._fg_anim.setStartValue(self._fg)
+        self._fg_anim.setEndValue(fg_to)
+        self._ind_anim.setStartValue(self._indicator)
+        self._ind_anim.setEndValue(ind_to)
+        for a in (self._bg_anim, self._fg_anim, self._ind_anim):
+            a.start()
 
     def enterEvent(self, e):
         if not self.isChecked():
-            self.setStyleSheet("""
-                QPushButton {
-                    background: #1e2334;
-                    color: #8898c8;
-                    border: none;
-                    border-left: 3px solid transparent;
-                    border-radius: 8px;
-                    text-align: left;
-                    padding-left: 14px;
-                    font-size: 13px;
-                }
-            """)
+            self._run_anim(QColor("#1e2334"), QColor("#8898c8"), 0.0)
         super().enterEvent(e)
 
     def leaveEvent(self, e):
-        self._update_style()
+        if not self.isChecked():
+            self._run_anim(QColor("#141720"), QColor("#4e5a78"), 0.0)
         super().leaveEvent(e)
 
+    def setChecked(self, v):
+        super().setChecked(v)
+        if v:
+            self._run_anim(QColor("#1e2a48"), QColor("#6b9ed4"), 1.0)
+        else:
+            self._run_anim(QColor("#141720"), QColor("#4e5a78"), 0.0)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = self.rect()
+        p.setPen(Qt.NoPen)
+        p.setBrush(self._bg)
+        p.drawRoundedRect(r, 8, 8)
+        if self._indicator > 0:
+            bar_h = int(r.height() * 0.5 * self._indicator)
+            bar_y = (r.height() - bar_h) // 2
+            p.setBrush(QColor("#4a6fa5"))
+            p.drawRoundedRect(QRect(0, bar_y, 3, bar_h), 1, 1)
+        p.setPen(self._fg)
+        font = self.font()
+        font.setPixelSize(13)
+        if self.isChecked():
+            font.setWeight(QFont.DemiBold)
+        p.setFont(font)
+        p.drawText(r.adjusted(14, 0, 0, 0), Qt.AlignVCenter | Qt.AlignLeft, self.text())
+        p.end()
 
 class AnimatedButton(QPushButton):
     def __init__(self, text="", parent=None):
         super().__init__(text, parent)
-        self.setStyleSheet("""
-            QPushButton {
-                background: #1e2230;
-                color: #dde3f0;
-                border: 1px solid #323a52;
-                border-radius: 10px;
-                padding: 8px 20px;
-                font-size: 13px;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background: #252c42;
-                border-color: #4a6fa5;
-                color: #ffffff;
-            }
-            QPushButton:pressed {
-                background: #2d3650;
-            }
-            QPushButton:disabled {
-                color: #3a4a68;
-                border-color: #252c3e;
-            }
-        """)
+        self._glow = 0.0
+        self._anim = QPropertyAnimation(self, b"_glow_val")
+        self._anim.setDuration(300)
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._border_color = QColor("#323a52")
+        self._bc_anim = QPropertyAnimation(self, b"_bc_val")
+        self._bc_anim.setDuration(300)
+        self._bc_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+    def _get_glow(self): return self._glow
+    def _set_glow(self, v):
+        self._glow = v
+        self.update()
+    _glow_val = pyqtProperty(float, _get_glow, _set_glow)
+
+    def _get_bc(self): return self._border_color
+    def _set_bc(self, c):
+        self._border_color = c
+        self.update()
+    _bc_val = pyqtProperty(QColor, _get_bc, _set_bc)
+
+    def enterEvent(self, e):
+        self._anim.stop(); self._bc_anim.stop()
+        self._anim.setStartValue(self._glow)
+        self._anim.setEndValue(1.0)
+        self._bc_anim.setStartValue(self._border_color)
+        self._bc_anim.setEndValue(QColor("#4a6fa5"))
+        self._anim.start(); self._bc_anim.start()
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._anim.stop(); self._bc_anim.stop()
+        self._anim.setStartValue(self._glow)
+        self._anim.setEndValue(0.0)
+        self._bc_anim.setStartValue(self._border_color)
+        self._bc_anim.setEndValue(QColor("#323a52"))
+        self._anim.start(); self._bc_anim.start()
+        super().leaveEvent(e)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = self.rect()
+        base = QColor("#1e2230")
+        hover = QColor("#252c42")
+        bg = QColor(
+            int(base.red()   + (hover.red()   - base.red())   * self._glow),
+            int(base.green() + (hover.green() - base.green()) * self._glow),
+            int(base.blue()  + (hover.blue()  - base.blue())  * self._glow),
+        )
+        p.setPen(QPen(self._border_color, 1))
+        p.setBrush(bg)
+        p.drawRoundedRect(r.adjusted(1,1,-1,-1), 10, 10)
+        if self._glow > 0:
+            glow_pen = QPen(QColor(74, 111, 165, int(80 * self._glow)), 1)
+            p.setPen(glow_pen)
+            p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(r.adjusted(0,0,-1,-1), 10, 10)
+        p.setPen(QColor("#dde3f0"))
+        font = self.font()
+        font.setPointSize(10)
+        p.setFont(font)
+        p.drawText(r, Qt.AlignCenter, self.text())
+        p.end()
 
 
 class AnimatedProgressBar(QProgressBar):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._display_val = 0.0
+        self._smooth_anim = QPropertyAnimation(self, b"_smooth_val")
+        self._smooth_anim.setDuration(600)
+        self._smooth_anim.setEasingCurve(QEasingCurve.OutCubic)
         self.setTextVisible(False)
         self.setFixedHeight(5)
-        self.setStyleSheet("""
-            QProgressBar {
-                background: #1e2230;
-                border: none;
-                border-radius: 3px;
-            }
-            QProgressBar::chunk {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #4a6fa5, stop:1 #6b9ed4);
-                border-radius: 3px;
-            }
-        """)
+
+    def _get_sv(self): return self._display_val
+    def _set_sv(self, v):
+        self._display_val = v
+        self.update()
+    _smooth_val = pyqtProperty(float, _get_sv, _set_sv)
+
+    def setValue(self, v):
+        super().setValue(v)
+        self._smooth_anim.stop()
+        self._smooth_anim.setStartValue(self._display_val)
+        self._smooth_anim.setEndValue(float(v))
+        self._smooth_anim.start()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = self.rect()
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor("#1e2230"))
+        p.drawRoundedRect(r, 3, 3)
+        if self.maximum() > 0:
+            ratio = self._display_val / self.maximum()
+            fill_w = int(r.width() * ratio)
+            if fill_w > 0:
+                grad = QLinearGradient(0, 0, fill_w, 0)
+                grad.setColorAt(0, QColor("#4a6fa5"))
+                grad.setColorAt(1, QColor("#6b9ed4"))
+                p.setBrush(grad)
+                p.drawRoundedRect(QRect(0, 0, fill_w, r.height()), 3, 3)
+        p.end()
 
 
 class ProxyCheckerWorker(QObject):
@@ -1078,7 +1211,38 @@ class StatCard(QFrame):
             "background: transparent; font-size: 32px; font-weight: 700; color: #c8d8f0; letter-spacing: -1px;"))
 
 
-class ProxyStatusDot(QWidget):
+COMBO_VIEW_STYLE = """
+    QAbstractItemView {
+        background: #141720;
+        color: #dde3f0;
+        border: 1px solid #4a6fa5;
+        border-radius: 6px;
+        outline: none;
+        padding: 2px;
+        selection-background-color: #2a3a5a;
+        selection-color: #e8eef8;
+    }
+    QAbstractItemView::item {
+        padding: 7px 12px;
+        min-height: 28px;
+        background: transparent;
+        color: #a8b8d8;
+    }
+    QAbstractItemView::item:hover {
+        background: #1e2538;
+        color: #dde3f0;
+    }
+    QAbstractItemView::item:selected {
+        background: #2a3a5a;
+        color: #e8eef8;
+    }
+"""
+
+
+def styled_combo():
+    cb = QComboBox()
+    cb.view().setStyleSheet(COMBO_VIEW_STYLE)
+    return cb
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(10, 10)
@@ -1103,9 +1267,10 @@ class ProxyRowWidget(QWidget):
         super().__init__(parent)
         self.proxy_data = proxy_data
         self.idx = idx
+        self.setFixedHeight(36)
         self.setStyleSheet("background: transparent;")
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(8, 6, 8, 6)
+        lay.setContentsMargins(8, 4, 8, 4)
         lay.setSpacing(10)
 
         self._dot = ProxyStatusDot()
@@ -1203,7 +1368,7 @@ class MainWindow(QMainWindow):
             ("Аккаунты", 0),
             ("Теги", 1),
             ("Пасты", 2),
-            ("Спам", 3),
+            ("Отписи", 3),
             ("Логи", 4),
             ("Прокси", 5),
             ("Чаты", 6),
@@ -1253,7 +1418,7 @@ class MainWindow(QMainWindow):
         topbar_lay.addWidget(self._pause_btn)
         topbar_lay.addSpacing(8)
 
-        self._run_btn = AnimatedButton("Начать спам")
+        self._run_btn = AnimatedButton("Начать отписи")
         self._run_btn.setFixedHeight(32)
         self._run_btn.setMinimumWidth(160)
         self._run_btn.clicked.connect(self._toggle_send)
@@ -1281,6 +1446,9 @@ class MainWindow(QMainWindow):
     def _switch_tab(self, idx):
         for i, btn in enumerate(self._tabs_btns):
             btn.setChecked(i == idx)
+        page = self._pages[idx]
+        if hasattr(page, "fade_in"):
+            page.fade_in()
         self._stack.setCurrentIndex(idx)
         if idx == 3:
             self._refresh_sender_page()
@@ -1288,7 +1456,7 @@ class MainWindow(QMainWindow):
             self._refresh_chats_accounts()
 
     def _mk_page(self):
-        w = QWidget()
+        w = FadeWidget()
         w.setStyleSheet("background: #1a1d26;")
         return w
 
@@ -1355,7 +1523,7 @@ class MainWindow(QMainWindow):
         hdr.setObjectName("header")
         lay.addWidget(hdr)
 
-        sub = QLabel("Создавайте отдельные базы для каждого потока спама")
+        sub = QLabel("Создавайте отдельные базы для каждого потока отписи")
         sub.setObjectName("subheader")
         lay.addWidget(sub)
 
@@ -1368,7 +1536,7 @@ class MainWindow(QMainWindow):
         lbl_db = QLabel("БАЗА:")
         lbl_db.setObjectName("section")
         top_row.addWidget(lbl_db)
-        self.db_combo = QComboBox()
+        self.db_combo = styled_combo()
         self.db_combo.setFixedHeight(34)
         self.db_combo.setMinimumWidth(200)
         self.db_combo.currentIndexChanged.connect(self._on_db_changed)
@@ -1766,7 +1934,7 @@ class MainWindow(QMainWindow):
         lbl_type = QLabel("ТИП")
         lbl_type.setObjectName("section")
         right.addWidget(lbl_type)
-        self.proxy_type = QComboBox()
+        self.proxy_type = styled_combo()
         self.proxy_type.addItems(["socks5", "socks4", "http"])
         self.proxy_type.setFixedHeight(38)
         right.addWidget(self.proxy_type)
@@ -1808,12 +1976,12 @@ class MainWindow(QMainWindow):
         self._proxy_row_widgets = []
         active_idx = self.data.get("active_proxy_idx", -1)
         for i, p in enumerate(self.data.get("proxies", [])):
-            item = QListWidgetItem(self.proxy_list)
             row_widget = ProxyRowWidget(p, i)
             status = self._proxy_status.get(i, "")
             if status:
                 row_widget.set_status(status)
             row_widget.set_active(i == active_idx)
+            item = QListWidgetItem(self.proxy_list)
             item.setSizeHint(row_widget.sizeHint())
             self.proxy_list.addItem(item)
             self.proxy_list.setItemWidget(item, row_widget)
@@ -1857,31 +2025,7 @@ class MainWindow(QMainWindow):
         self.proxy_user.clear()
         self.proxy_pass.clear()
 
-    def _import_proxies_bulk(self):
-        text = self.proxy_bulk.toPlainText().strip()
-        if not text:
-            return
-        added = 0
-        for line in text.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            parts = line.split(":")
-            if len(parts) >= 3:
-                ptype = parts[0].lower() if parts[0].lower() in ("socks5", "socks4", "http") else "socks5"
-                host = parts[1]
-                try:
-                    port = int(parts[2])
-                except ValueError:
-                    continue
-                user = parts[3] if len(parts) > 3 else ""
-                password = parts[4] if len(parts) > 4 else ""
-                self.data["proxies"].append({"type": ptype, "host": host, "port": port, "user": user, "password": password})
-                added += 1
-        save_data(self.data)
-        self._refresh_proxies()
-        self.proxy_bulk.clear()
-        QMessageBox.information(self, "Импорт", f"Добавлено {added} прокси")
+
 
     def _del_proxy(self):
         row = self.proxy_list.currentRow()
@@ -1955,7 +2099,7 @@ class MainWindow(QMainWindow):
         lbl_acc = QLabel("АККАУНТ")
         lbl_acc.setObjectName("section")
         top_row.addWidget(lbl_acc)
-        self.chat_acc_combo = QComboBox()
+        self.chat_acc_combo = styled_combo()
         self.chat_acc_combo.setMinimumWidth(260)
         self.chat_acc_combo.setFixedHeight(38)
         top_row.addWidget(self.chat_acc_combo)
@@ -2101,7 +2245,7 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(36, 36, 36, 0)
         outer.setSpacing(0)
 
-        hdr = QLabel("Спам")
+        hdr = QLabel("Отписи")
         hdr.setObjectName("header")
         outer.addWidget(hdr)
         outer.addSpacing(12)
@@ -2267,7 +2411,7 @@ class MainWindow(QMainWindow):
         lbl_a = QLabel("АККАУНТ")
         lbl_a.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color: #6b82c0; letter-spacing: 1.8px;")
         acc_col.addWidget(lbl_a)
-        acc_combo = QComboBox()
+        acc_combo = styled_combo()
         acc_combo.setFixedHeight(38)
         acc_combo.setMinimumWidth(220)
         for acc in self.data["accounts"]:
@@ -2281,7 +2425,7 @@ class MainWindow(QMainWindow):
         lbl_p = QLabel("ПРОКСИ")
         lbl_p.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color: #6b82c0; letter-spacing: 1.8px;")
         proxy_col.addWidget(lbl_p)
-        proxy_combo = QComboBox()
+        proxy_combo = styled_combo()
         proxy_combo.setFixedHeight(38)
         proxy_combo.setMinimumWidth(220)
         proxy_combo.addItem("Без прокси")
@@ -2294,7 +2438,7 @@ class MainWindow(QMainWindow):
         lbl_r = QLabel("ТЕГИ (БАЗА)")
         lbl_r.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color: #6b82c0; letter-spacing: 1.8px;")
         rec_col.addWidget(lbl_r)
-        rec_combo = QComboBox()
+        rec_combo = styled_combo()
         rec_combo.setFixedHeight(38)
         rec_combo.setMinimumWidth(200)
         rec_combo.addItem("База")
@@ -2318,14 +2462,27 @@ class MainWindow(QMainWindow):
                 border-radius: 8px;
                 outline: none;
                 padding: 4px;
+                color: #a8b8d8;
             }
             QListWidget::item {
                 border-radius: 6px;
                 padding: 5px 10px;
                 margin: 1px 2px;
                 color: #a8b8d8;
+                background: transparent;
             }
             QListWidget::item:hover { background: #202535; }
+            QListWidget::indicator {
+                width: 13px;
+                height: 13px;
+                border: 1px solid #4a6fa5;
+                border-radius: 3px;
+                background: #1a1d26;
+            }
+            QListWidget::indicator:checked {
+                background: #4a6fa5;
+                border-color: #4a6fa5;
+            }
         """)
         for i, p in enumerate(self.data["pastes"]):
             if not p.strip():
@@ -2343,8 +2500,6 @@ class MainWindow(QMainWindow):
         row.addLayout(pastes_col)
         row.addStretch()
         card_lay.addLayout(row)
-
-
 
         start_btn = AnimatedButton(f"Запустить поток {idx + 1}")
         start_btn.setMinimumHeight(36)
@@ -2526,6 +2681,22 @@ class MainWindow(QMainWindow):
                     card_data["proxy_combo"].addItem(f"{p['type'].upper()}  {p['host']}:{p['port']}")
                 if old_proxy < card_data["proxy_combo"].count():
                     card_data["proxy_combo"].setCurrentIndex(old_proxy)
+                pw = card_data["paste_list"]
+                checked_idxs = set()
+                for i in range(pw.count()):
+                    it = pw.item(i)
+                    if it.checkState() == Qt.Checked:
+                        checked_idxs.add(it.data(Qt.UserRole))
+                pw.clear()
+                for i, p in enumerate(self.data["pastes"]):
+                    if not p.strip():
+                        continue
+                    preview = p[:40].replace("\n", " ")
+                    item = QListWidgetItem(f"  {i+1}.  {preview}")
+                    item.setData(Qt.UserRole, i)
+                    item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                    item.setCheckState(Qt.Checked if (i in checked_idxs or not checked_idxs) else Qt.Unchecked)
+                    pw.addItem(item)
         self._update_eta()
 
     def _update_eta(self):
@@ -2560,7 +2731,7 @@ class MainWindow(QMainWindow):
         if any_running:
             for idx in list(self._workers.keys()):
                 self._stop_worker(idx)
-            self._run_btn.setText("Начать спам")
+            self._run_btn.setText("Начать отписи")
         else:
             for idx in range(len(self._worker_cards)):
                 self._start_worker(idx)
