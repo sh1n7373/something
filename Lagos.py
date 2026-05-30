@@ -8,7 +8,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-APP_VERSION = "2.1"
+APP_VERSION = "2.2"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/Lagos.py"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
 
@@ -2473,7 +2473,8 @@ class MainWindow(QMainWindow):
         pastes_col.addWidget(lbl_ps)
         paste_list_w = QListWidget()
         paste_list_w.setSelectionMode(QAbstractItemView.NoSelection)
-        paste_list_w.setMaximumHeight(90)
+        paste_list_w.setMinimumHeight(160)
+        paste_list_w.setMaximumHeight(300)
         paste_list_w.setMinimumWidth(220)
         paste_list_w.setStyleSheet("""
             QListWidget {
