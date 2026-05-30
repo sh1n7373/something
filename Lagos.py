@@ -2905,21 +2905,50 @@ def _show_update_dialog(parent_widget=None):
     msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
     msg.setStyleSheet(STYLE)
     if msg.exec_() == QMessageBox.Yes:
-        _do_update()
+        _do_update(parent_widget)
 
 
-def _do_update():
+def _do_update(parent_widget=None):
     try:
-        current = Path(sys.argv[0]).resolve()
-        backup = current.with_suffix(".py.bak")
         with urllib.request.urlopen(GITHUB_RAW_URL, timeout=30) as r:
             new_code = r.read()
-        backup.write_bytes(current.read_bytes())
-        current.write_bytes(new_code)
-        subprocess.Popen([sys.executable] + sys.argv)
-        sys.exit(0)
+
+        is_frozen = getattr(sys, "frozen", False)
+
+        if is_frozen:
+            # Запущен как .exe
+            current_exe = Path(sys.executable).resolve()
+            current_dir = current_exe.parent
+
+            # Перезаписываем Lagos.py новой версией
+            lagos_py = current_dir / "Lagos.py"
+            lagos_py.write_bytes(new_code)
+
+            # Удаляем старый .exe (может не удалиться пока запущен — не страшно)
+            try:
+                current_exe.unlink()
+            except Exception:
+                pass
+
+            QMessageBox.information(
+                parent_widget,
+                "Обновление загружено",
+                "Lagos.py обновлён!\n\n"
+                "Запусти install.bat чтобы пересобрать приложение."
+            )
+            sys.exit(0)
+
+        else:
+            # Запущен как .py — заменяем и перезапускаем автоматически
+            current = Path(sys.argv[0]).resolve()
+            backup = current.with_suffix(".bak")
+            backup.write_bytes(current.read_bytes())
+            current.write_bytes(new_code)
+            subprocess.Popen([sys.executable, str(current)])
+            sys.exit(0)
+
     except Exception as e:
-        QMessageBox.critical(None, "Ошибка обновления", str(e))
+        QMessageBox.critical(parent_widget, "Ошибка обновления", str(e))
 
 
 def resource_path(name):
@@ -2960,7 +2989,7 @@ if __name__ == "__main__":
             else:
                 QTimer.singleShot(2000, _poll_update)
 
-        threading.Thread(target=lambda: check_for_update(win), daemon=True).start()
+        threading.Thread(target=check_for_update, daemon=True).start()
         QTimer.singleShot(3000, _poll_update)
         sys.exit(app.exec_())
     except Exception:
