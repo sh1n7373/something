@@ -8,8 +8,9 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QDialog, QVBoxLayout, QHBoxLayout,
     QGridLayout, QLabel, QPushButton, QLineEdit, QTextEdit, QPlainTextEdit,
     QListWidget, QListWidgetItem, QScrollArea, QFrame, QStackedWidget,
-    QAbstractItemView, QMessageBox, QComboBox, QSize
+    QAbstractItemView, QMessageBox, QComboBox
 )
+from PyQt5.QtCore import Qt, QTimer, QTime, pyqtSignal, QObject, QSize
 from PyQt5.QtCore import Qt, QTimer, QTime, pyqtSignal, QObject
 from PyQt5.QtGui import QIcon, QPainter, QColor
 
