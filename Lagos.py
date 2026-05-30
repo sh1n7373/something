@@ -9,7 +9,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-APP_VERSION = "2.2"
+APP_VERSION = "2.3"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/Lagos.py"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
 
@@ -1128,26 +1128,29 @@ class SenderWorker(QObject):
         pastes_to_use = self.pastes
         total = len(self.recipients) * len(pastes_to_use)
         self._done = 0
-        prev_tag = None
+        first_rec = True
 
         for rec in self.recipients:
             tag = recipient_tag(rec)
             token = recipient_token(rec)
 
-            if prev_tag is not None and self.tag_interval_min > 0:
-                self.log_signal.emit(
-                    f"[W{self.worker_id+1}] Ждём {self.tag_interval_min} мин...",
-                    "info"
-                )
-                await self._interruptible_sleep(self.tag_interval_min * 60)
+            if not first_rec:
+                if self.tag_interval_min > 0:
+                    self.log_signal.emit(
+                        f"[W{self.worker_id+1}] Ждём {self.tag_interval_min} мин...",
+                        "info"
+                    )
+                    await self._interruptible_sleep(self.tag_interval_min * 60)
+                elif self.interval_min > 0:
+                    await self._interruptible_sleep(self.interval_min * 60)
                 if self._stop:
                     await client.disconnect()
                     return
 
-            prev_tag = tag
+            first_rec = False
             self.current_tag_signal.emit(self.worker_id, tag)
 
-            for paste in pastes_to_use:
+            for i, paste in enumerate(pastes_to_use):
                 if self._stop:
                     self.log_signal.emit(f"[W{self.worker_id+1}] Остановлена", "warn")
                     await client.disconnect()
@@ -1182,9 +1185,8 @@ class SenderWorker(QObject):
                         self.failed_detail_signal.emit(tag, str(ex))
                 self._done += 1
                 self.progress_signal.emit(self._done, total)
-                if self._done < total:
-                    if self.tag_interval_min == 0 and self.interval_min > 0:
-                        await self._interruptible_sleep(self.interval_min * 60)
+                if i < len(pastes_to_use) - 1 and self.interval_min > 0:
+                    await self._interruptible_sleep(self.interval_min * 60)
 
         await client.disconnect()
 
