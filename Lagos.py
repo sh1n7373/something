@@ -9,7 +9,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-APP_VERSION = "2.4"
+APP_VERSION = "2.5"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/Lagos.py"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
 
@@ -1070,6 +1070,7 @@ class SenderWorker(QObject):
     failed_signal = pyqtSignal(str)
     failed_detail_signal = pyqtSignal(str, str)
     current_tag_signal = pyqtSignal(int, str)
+    spamblock_signal = pyqtSignal(int, str, str, list)
 
     def __init__(self, account, recipients, pastes, interval_min, pastes_per_recipient,
                  proxy=None, tag_interval_min=0, worker_id=0):
@@ -1178,18 +1179,83 @@ class SenderWorker(QObject):
                     self.log_signal.emit(f"[W{self.worker_id+1}] Недоступен  {tag}", "warn")
                     self.failed_signal.emit(tag)
                     self.failed_detail_signal.emit(tag, "Приватность или пользователь не найден")
+                    self._done += 1
+                    self.progress_signal.emit(self._done, total)
+                    break
                 except PeerFloodError:
-                    self.log_signal.emit(f"[W{self.worker_id+1}] PeerFlood, остановка", "err")
+                    self.log_signal.emit(f"[W{self.worker_id+1}] PeerFlood на {tag} - пытаюсь снять спамблок...", "err")
+                    freed = False
+                    last_reply = ""
+                    buttons = []
+                    for attempt in range(3):
+                        try:
+                            await client.send_message("SpamBot", "/start")
+                            await asyncio.sleep(3)
+                            reply_text = ""
+                            btn_labels = []
+                            async for m in client.iter_messages("SpamBot", limit=3):
+                                if m.message and not reply_text:
+                                    reply_text = m.message
+                                if m.reply_markup:
+                                    try:
+                                        for row in m.reply_markup.rows:
+                                            for btn in row.buttons:
+                                                if hasattr(btn, "text"):
+                                                    btn_labels.append(btn.text)
+                                    except Exception:
+                                        pass
+                                break
+                            last_reply = reply_text
+                            buttons = btn_labels
+                            self.log_signal.emit(f"[W{self.worker_id+1}] SpamBot попытка {attempt+1}: {reply_text[:80]}", "warn")
+                            low = reply_text.lower()
+                            if any(w in low for w in ("free", "no limits", "свободен", "ограничений", "bird")):
+                                freed = True
+                                self.log_signal.emit(f"[W{self.worker_id+1}] Спамблок снят", "ok")
+                                break
+                        except Exception as sb_ex:
+                            self.log_signal.emit(f"[W{self.worker_id+1}] SpamBot ошибка: {sb_ex}", "err")
+                        await asyncio.sleep(5)
+                    self.spamblock_signal.emit(self.worker_id, tag, last_reply, buttons)
                     await client.disconnect()
                     return
                 except Exception as ex:
-                    if "database is locked" in str(ex).lower():
+                    err_str = str(ex).lower()
+                    skip_errors = (
+                        "database is locked",
+                        "user not found",
+                        "username invalid",
+                        "nobody",
+                        "you have been blocked",
+                        "user is blocked",
+                        "chat write forbidden",
+                        "not in the chat",
+                        "banned",
+                        "deactivated",
+                        "need to buy",
+                        "paid",
+                        "slowmode",
+                    )
+                    if "database is locked" in err_str:
                         self.log_signal.emit(f"[W{self.worker_id+1}] База заблокирована, ждём...", "warn")
                         await asyncio.sleep(5)
+                    elif any(e in err_str for e in skip_errors):
+                        self.log_signal.emit(f"[W{self.worker_id+1}] Скип {tag}: {ex}", "warn")
+                        self.failed_signal.emit(tag)
+                        self.failed_detail_signal.emit(tag, str(ex))
+                        self._done += 1
+                        self.progress_signal.emit(self._done, total)
+                        break
                     else:
                         self.log_signal.emit(f"[W{self.worker_id+1}] err  {tag}: {ex}", "err")
                         self.failed_signal.emit(tag)
                         self.failed_detail_signal.emit(tag, str(ex))
+                else:
+                    self._done += 1
+                    self.progress_signal.emit(self._done, total)
+                    if i < len(pastes_to_use) - 1 and self.interval_min > 0:
+                        await self._interruptible_sleep(self.interval_min * 60)
+                    continue
                 self._done += 1
                 self.progress_signal.emit(self._done, total)
                 if i < len(pastes_to_use) - 1 and self.interval_min > 0:
@@ -1431,6 +1497,7 @@ class MainWindow(QMainWindow):
             ("Логи", 4),
             ("Прокси", 5),
             ("Чаты", 6),
+            ("Спам", 7),
         ]
         for name, idx in tabs:
             btn = SidebarButton(name)
@@ -1496,6 +1563,7 @@ class MainWindow(QMainWindow):
             self._build_logs_page(),
             self._build_proxies_page(),
             self._build_chats_page(),
+            self._build_spamblock_page(),
         ]
         for p in self._pages:
             self._stack.addWidget(p)
@@ -1513,6 +1581,8 @@ class MainWindow(QMainWindow):
             self._refresh_sender_page()
         if idx == 6:
             self._refresh_chats_accounts()
+        if idx == 7:
+            self._refresh_spamblock_page()
 
     def _mk_page(self):
         w = FadeWidget()
@@ -2494,50 +2564,54 @@ class MainWindow(QMainWindow):
             title_row.addWidget(rm_btn)
         card_lay.addLayout(title_row)
 
-        row = QHBoxLayout()
-        row.setSpacing(20)
+        row1 = QHBoxLayout()
+        row1.setSpacing(16)
 
         acc_col = QVBoxLayout()
+        acc_col.setSpacing(6)
         lbl_a = QLabel("АККАУНТ")
         lbl_a.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color: #6b82c0; letter-spacing: 1.8px;")
         acc_col.addWidget(lbl_a)
         acc_combo = styled_combo()
         acc_combo.setFixedHeight(38)
-        acc_combo.setMinimumWidth(220)
         for acc in self.data["accounts"]:
             name = acc.get("name", acc["phone"])
             un = f"@{acc['username']}" if acc.get("username") else ""
             acc_combo.addItem(f"{name}  {un}  {acc['phone']}")
         acc_col.addWidget(acc_combo)
-        row.addLayout(acc_col)
+        row1.addLayout(acc_col, 2)
 
         proxy_col = QVBoxLayout()
+        proxy_col.setSpacing(6)
         lbl_p = QLabel("ПРОКСИ")
         lbl_p.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color: #6b82c0; letter-spacing: 1.8px;")
         proxy_col.addWidget(lbl_p)
         proxy_combo = styled_combo()
         proxy_combo.setFixedHeight(38)
-        proxy_combo.setMinimumWidth(220)
         proxy_combo.addItem("Без прокси")
         for p in self.data.get("proxies", []):
             proxy_combo.addItem(f"{p['type'].upper()}  {p['host']}:{p['port']}")
         proxy_col.addWidget(proxy_combo)
-        row.addLayout(proxy_col)
+        row1.addLayout(proxy_col, 2)
 
         rec_col = QVBoxLayout()
+        rec_col.setSpacing(6)
         lbl_r = QLabel("ТЕГИ (БАЗА)")
         lbl_r.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color: #6b82c0; letter-spacing: 1.8px;")
         rec_col.addWidget(lbl_r)
         rec_combo = styled_combo()
         rec_combo.setFixedHeight(38)
-        rec_combo.setMinimumWidth(200)
         rec_combo.addItem("База")
         for key in self.data.get("recipient_dbs", {}):
             rec_combo.addItem(key)
         rec_col.addWidget(rec_combo)
-        row.addLayout(rec_col)
+        row1.addLayout(rec_col, 2)
+
+        card_lay.addLayout(row1)
+        card_lay.addSpacing(12)
 
         pastes_col = QVBoxLayout()
+        pastes_col.setSpacing(6)
         lbl_ps = QLabel("ПАСТЫ")
         lbl_ps.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color: #6b82c0; letter-spacing: 1.8px;")
         pastes_col.addWidget(lbl_ps)
@@ -2588,9 +2662,7 @@ class MainWindow(QMainWindow):
             Qt.Unchecked if it.checkState() == Qt.Checked else Qt.Checked
         ))
         pastes_col.addWidget(paste_list_w)
-        row.addLayout(pastes_col)
-        row.addStretch()
-        card_lay.addLayout(row)
+        card_lay.addLayout(pastes_col)
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
@@ -2716,6 +2788,8 @@ class MainWindow(QMainWindow):
         worker.failed_signal.connect(self._on_failed)
         worker.failed_detail_signal.connect(self._on_failed_detail)
         worker.current_tag_signal.connect(self._on_worker_current_tag)
+        worker.spamblock_signal.connect(self._on_spamblock)
+        worker.current_tag_signal.connect(lambda wid, t: self._store_last_tag(wid, t))
 
         self._workers[idx] = worker
         self._total_messages = sum(
@@ -2799,11 +2873,253 @@ class MainWindow(QMainWindow):
             self._worker_cards[idx]["pause_btn"].setText("Пауза")
             self._worker_cards[idx]["current_tag_lbl"].setText("")
         self._on_log(f"[W{idx+1}] Завершён", "ok")
-        all_done = all(w is None for w in self._workers.values())
-        if all_done:
+        any_running = any(w is not None for w in self._workers.values())
+        if any_running:
+            self._run_btn.setText("Остановить все")
+        else:
+            self._run_btn.setText("Начать отписи")
             self.progress_bar.hide()
             self._pause_btn.hide()
             self._on_finished_all()
+
+    def _store_last_tag(self, worker_id, tag):
+        if not hasattr(self, "_last_tags"):
+            self._last_tags = {}
+        self._last_tags[worker_id] = tag
+
+    def _get_acc_for_worker(self, worker_id):
+        if worker_id < len(self._worker_cards):
+            idx = self._worker_cards[worker_id]["acc_combo"].currentIndex()
+            if 0 <= idx < len(self.data["accounts"]):
+                return self.data["accounts"][idx]
+        return None
+
+    def _on_spamblock(self, worker_id, stopped_at_tag, spambot_reply, spambot_buttons):
+        acc = self._get_acc_for_worker(worker_id)
+        acc_name = acc.get("name", acc["phone"]) if acc else f"Поток {worker_id+1}"
+
+        entry = {
+            "worker_id": worker_id,
+            "acc_name": acc_name,
+            "acc": acc,
+            "stopped_at": stopped_at_tag,
+            "reply": spambot_reply,
+            "buttons": spambot_buttons,
+            "time": datetime.now().strftime("%H:%M:%S"),
+        }
+        if not hasattr(self, "_spamblock_log"):
+            self._spamblock_log = []
+        self._spamblock_log.append(entry)
+
+        self._switch_tab(7)
+        self._refresh_spamblock_page()
+
+    def _refresh_spamblock_page(self):
+        if not hasattr(self, "_spam_list_widget"):
+            return
+        self._spam_list_widget.clear()
+        for e in getattr(self, "_spamblock_log", []):
+            low = (e["reply"] or "").lower()
+            freed = any(w in low for w in ("free", "no limits", "свободен", "ограничений", "bird"))
+            status = "СНЯТ" if freed else "БЛОК"
+            color = "#6a9e80" if freed else "#b06070"
+            item = QListWidgetItem(f"  [{e['time']}]  {e['acc_name']}  —  {e['stopped_at']}  [{status}]")
+            item.setForeground(QColor(color))
+            item.setData(Qt.UserRole, e)
+            self._spam_list_widget.addItem(item)
+
+    def _build_spamblock_page(self):
+        w = self._mk_page()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(36, 36, 36, 36)
+        lay.setSpacing(14)
+
+        hdr = QLabel("Спамблок")
+        hdr.setObjectName("header")
+        lay.addWidget(hdr)
+        sub = QLabel("Аккаунты словившие PeerFlood - статус и ручное управление SpamBot")
+        sub.setObjectName("subheader")
+        lay.addWidget(sub)
+
+        sep = QFrame()
+        sep.setObjectName("separator")
+        lay.addWidget(sep)
+
+        content = QHBoxLayout()
+        content.setSpacing(20)
+
+        left = QVBoxLayout()
+        lbl_l = QLabel("АККАУНТЫ")
+        lbl_l.setObjectName("section")
+        left.addWidget(lbl_l)
+
+        self._spam_list_widget = QListWidget()
+        self._spam_list_widget.currentRowChanged.connect(self._on_spamblock_selected)
+        left.addWidget(self._spam_list_widget)
+
+        clear_btn = AnimatedButton("Очистить")
+        clear_btn.clicked.connect(self._clear_spamblock_log)
+        left.addWidget(clear_btn)
+        content.addLayout(left, 1)
+
+        right = QVBoxLayout()
+        right.setSpacing(10)
+
+        lbl_r = QLabel("ОТВЕТ SPAMBOT")
+        lbl_r.setObjectName("section")
+        right.addWidget(lbl_r)
+
+        self._spam_reply_lbl = QTextEdit()
+        self._spam_reply_lbl.setReadOnly(True)
+        self._spam_reply_lbl.setMaximumHeight(120)
+        self._spam_reply_lbl.setStyleSheet("""
+            QTextEdit {
+                background: #13161f;
+                border: 1px solid #232840;
+                border-radius: 8px;
+                padding: 10px;
+                color: #6a9e80;
+                font-size: 13px;
+            }
+        """)
+        right.addWidget(self._spam_reply_lbl)
+
+        lbl_info = QLabel("ОСТАНОВЛЕН НА ТЕГЕ")
+        lbl_info.setObjectName("section")
+        right.addWidget(lbl_info)
+        self._spam_tag_lbl = QLabel("")
+        self._spam_tag_lbl.setStyleSheet("color: #a8b8d8; font-size: 13px; background: #141720; border: 1px solid #2c3348; border-radius: 8px; padding: 8px 12px;")
+        right.addWidget(self._spam_tag_lbl)
+
+        lbl_btns = QLabel("ВАРИАНТЫ ОТВЕТА SPAMBOT")
+        lbl_btns.setObjectName("section")
+        right.addWidget(lbl_btns)
+
+        self._spam_btns_frame = QFrame()
+        self._spam_btns_frame.setObjectName("card")
+        spam_btns_lay = QVBoxLayout(self._spam_btns_frame)
+        spam_btns_lay.setContentsMargins(12, 12, 12, 12)
+        spam_btns_lay.setSpacing(8)
+        self._spam_btns_layout = spam_btns_lay
+        right.addWidget(self._spam_btns_frame)
+
+        right.addSpacing(8)
+        manual_row = QHBoxLayout()
+        self._spam_manual_edit = QLineEdit()
+        self._spam_manual_edit.setPlaceholderText("Ввести вручную и отправить...")
+        manual_row.addWidget(self._spam_manual_edit)
+        send_manual_btn = AnimatedButton("Отправить")
+        send_manual_btn.setFixedWidth(110)
+        send_manual_btn.clicked.connect(self._send_spambot_manual)
+        manual_row.addWidget(send_manual_btn)
+        right.addLayout(manual_row)
+
+        right.addSpacing(8)
+        start_btn = AnimatedButton("Отправить /start")
+        start_btn.clicked.connect(self._send_spambot_start)
+        right.addWidget(start_btn)
+
+        right.addStretch()
+        content.addLayout(right, 2)
+        lay.addLayout(content)
+        return w
+
+    def _on_spamblock_selected(self, row):
+        entries = getattr(self, "_spamblock_log", [])
+        if row < 0 or row >= len(entries):
+            return
+        e = entries[row]
+        self._spam_reply_lbl.setPlainText(e.get("reply", ""))
+        self._spam_tag_lbl.setText(e.get("stopped_at", ""))
+        for i in reversed(range(self._spam_btns_layout.count())):
+            w = self._spam_btns_layout.itemAt(i).widget()
+            if w:
+                w.deleteLater()
+        for btn_text in e.get("buttons", []):
+            b = AnimatedButton(btn_text)
+            b.clicked.connect(lambda _, t=btn_text, en=e: self._send_spambot_reply(t, en))
+            self._spam_btns_layout.addWidget(b)
+        if not e.get("buttons"):
+            no_btn = QLabel("Нет кнопок от SpamBot")
+            no_btn.setStyleSheet("color: #3a4a68; font-size: 12px;")
+            self._spam_btns_layout.addWidget(no_btn)
+
+    def _send_spambot_reply(self, text, entry):
+        acc = entry.get("acc")
+        if not acc:
+            return
+        proxy = self._get_active_proxy()
+        self._do_spambot_send(acc, text, proxy)
+
+    def _send_spambot_manual(self):
+        text = self._spam_manual_edit.text().strip()
+        if not text:
+            return
+        row = self._spam_list_widget.currentRow()
+        entries = getattr(self, "_spamblock_log", [])
+        if row < 0 or row >= len(entries):
+            return
+        acc = entries[row].get("acc")
+        if not acc:
+            return
+        proxy = self._get_active_proxy()
+        self._do_spambot_send(acc, text, proxy)
+        self._spam_manual_edit.clear()
+
+    def _send_spambot_start(self):
+        row = self._spam_list_widget.currentRow()
+        entries = getattr(self, "_spamblock_log", [])
+        if row < 0 or row >= len(entries):
+            return
+        acc = entries[row].get("acc")
+        if not acc:
+            return
+        proxy = self._get_active_proxy()
+        self._do_spambot_send(acc, "/start", proxy)
+
+    def _do_spambot_send(self, acc, text, proxy):
+        def _run():
+            loop = asyncio.new_event_loop()
+            async def _inner():
+                try:
+                    client = build_client(acc, proxy)
+                    await client.connect()
+                    await client.send_message("SpamBot", text)
+                    await asyncio.sleep(3)
+                    reply = ""
+                    btns = []
+                    async for m in client.iter_messages("SpamBot", limit=3):
+                        if m.message and not reply:
+                            reply = m.message
+                        if m.reply_markup:
+                            try:
+                                for row2 in m.reply_markup.rows:
+                                    for b in row2.buttons:
+                                        if hasattr(b, "text"):
+                                            btns.append(b.text)
+                            except Exception:
+                                pass
+                        break
+                    await client.disconnect()
+                    name = acc.get("name", acc["phone"])
+                    self._on_log(f"SpamBot [{name}] -> {text}: {reply[:120]}", "info")
+                    row = self._spam_list_widget.currentRow()
+                    entries = getattr(self, "_spamblock_log", [])
+                    if 0 <= row < len(entries):
+                        entries[row]["reply"] = reply
+                        entries[row]["buttons"] = btns
+                        QTimer.singleShot(0, lambda: self._on_spamblock_selected(row))
+                        QTimer.singleShot(0, self._refresh_spamblock_page)
+                except Exception as ex:
+                    self._on_log(f"SpamBot ошибка: {ex}", "err")
+            loop.run_until_complete(_inner())
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _clear_spamblock_log(self):
+        self._spamblock_log = []
+        self._refresh_spamblock_page()
+        self._spam_reply_lbl.setPlainText("")
+        self._spam_tag_lbl.setText("")
 
     def _on_finished_all(self):
         if self._failed_recipients:
@@ -2870,13 +3186,10 @@ class MainWindow(QMainWindow):
             self.eta_lbl.setText("")
             return
         interval_min = self.interval_spin.value()
-        total_min = (total - 1) * interval_min
-        start_qtime = self.start_time_edit.time()
-        start_dt = datetime.now().replace(
-            hour=start_qtime.hour(), minute=start_qtime.minute(),
-            second=0, microsecond=0
-        )
-        end_dt = start_dt + timedelta(minutes=total_min)
+        done = getattr(self, "_done_messages", 0)
+        remaining = max(0, total - done)
+        remaining_min = remaining * interval_min
+        end_dt = datetime.now() + timedelta(minutes=remaining_min)
         self.eta_lbl.setText(f"Конец ~{end_dt.strftime('%H:%M')}  {total} сообщений")
 
     def _toggle_send(self):
@@ -2928,8 +3241,10 @@ class MainWindow(QMainWindow):
 
     def _on_progress(self, current, total):
         if total > 0:
+            self._done_messages = current
             self.progress_bar.setValue(current)
             self.stat_left.set_value(max(0, total - current))
+            self._update_eta()
 
     def _build_logs_page(self):
         w = self._mk_page()
