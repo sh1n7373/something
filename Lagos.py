@@ -3,12 +3,13 @@ import re
 import json
 import asyncio
 import threading
+import sqlite3
 import urllib.request
 import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-APP_VERSION = "2.1"
+APP_VERSION = "2.0"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/Lagos.py"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
 
@@ -61,6 +62,18 @@ APP_DIR = _get_app_dir()
 DATA_FILE = APP_DIR / "data.json"
 SESSION_DIR = APP_DIR / "sessions"
 SESSION_DIR.mkdir(exist_ok=True)
+
+
+def _set_session_wal(phone):
+    path = SESSION_DIR / f"{phone.replace('+', '')}.session"
+    if path.exists():
+        try:
+            con = sqlite3.connect(str(path), timeout=30)
+            con.execute("PRAGMA journal_mode=WAL")
+            con.execute("PRAGMA busy_timeout=30000")
+            con.close()
+        except Exception:
+            pass
 
 STYLE = """
 QMainWindow, QDialog {
@@ -343,6 +356,10 @@ def save_data(data):
 
 def build_client(acc, proxy=None):
     sess = str(SESSION_DIR / acc["phone"].replace("+", ""))
+    kwargs = {
+        "connection_retries": 5,
+        "retry_delay": 2,
+    }
     if proxy and SOCKS_AVAILABLE:
         ptype = proxy.get("type", "socks5").lower()
         pt = socks.SOCKS5
@@ -350,7 +367,7 @@ def build_client(acc, proxy=None):
             pt = socks.SOCKS4
         elif ptype == "http":
             pt = socks.HTTP
-        proxy_tuple = (
+        kwargs["proxy"] = (
             pt,
             proxy["host"],
             int(proxy["port"]),
@@ -358,8 +375,7 @@ def build_client(acc, proxy=None):
             proxy.get("user") or None,
             proxy.get("password") or None,
         )
-        return TelegramClient(sess, acc["api_id"], acc["api_hash"], proxy=proxy_tuple)
-    return TelegramClient(sess, acc["api_id"], acc["api_hash"])
+    return TelegramClient(sess, acc["api_id"], acc["api_hash"], **kwargs)
 
 
 class StyledSpinBox(QWidget):
@@ -1091,15 +1107,22 @@ class SenderWorker(QObject):
 
     async def _send_all(self):
         acc = self.account
+        _set_session_wal(acc["phone"])
         client = build_client(acc, self.proxy)
-        try:
-            await client.connect()
-            if not await client.is_user_authorized():
-                self.log_signal.emit("Аккаунт не авторизован", "err")
-                await client.disconnect()
-                return
-        except Exception as ex:
-            self.log_signal.emit(f"[W{self.worker_id+1}] Ошибка подключения: {ex}", "err")
+        for attempt in range(3):
+            try:
+                await client.connect()
+                break
+            except Exception as ex:
+                if "database is locked" in str(ex).lower() and attempt < 2:
+                    self.log_signal.emit(f"[W{self.worker_id+1}] База заблокирована, повтор...", "warn")
+                    await asyncio.sleep(3)
+                else:
+                    self.log_signal.emit(f"[W{self.worker_id+1}] Ошибка подключения: {ex}", "err")
+                    return
+        if not await client.is_user_authorized():
+            self.log_signal.emit("Аккаунт не авторизован", "err")
+            await client.disconnect()
             return
 
         pastes_to_use = self.pastes
@@ -1150,9 +1173,13 @@ class SenderWorker(QObject):
                     await client.disconnect()
                     return
                 except Exception as ex:
-                    self.log_signal.emit(f"[W{self.worker_id+1}] err  {tag}: {ex}", "err")
-                    self.failed_signal.emit(tag)
-                    self.failed_detail_signal.emit(tag, str(ex))
+                    if "database is locked" in str(ex).lower():
+                        self.log_signal.emit(f"[W{self.worker_id+1}] База заблокирована, ждём...", "warn")
+                        await asyncio.sleep(5)
+                    else:
+                        self.log_signal.emit(f"[W{self.worker_id+1}] err  {tag}: {ex}", "err")
+                        self.failed_signal.emit(tag)
+                        self.failed_detail_signal.emit(tag, str(ex))
                 self._done += 1
                 self.progress_signal.emit(self._done, total)
                 if self._done < total:
