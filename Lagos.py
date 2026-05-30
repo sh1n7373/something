@@ -9,7 +9,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-APP_VERSION = "3.7"
+APP_VERSION = "3.8"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/Lagos.py"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
 
@@ -3022,6 +3022,8 @@ class MainWindow(QMainWindow):
             "info"
         )
         self._run_btn.setText("Остановить все")
+
+    def _stop_worker(self, idx):
         if idx in self._workers and self._workers[idx]:
             self._workers[idx].stop()
             self._workers[idx] = None
