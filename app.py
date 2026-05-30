@@ -1713,17 +1713,20 @@ class MainWindow(QMainWindow):
                         await client.disconnect(); return
 
                     await client.send_message("@SpamBot", text)
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(8)
                     reply, btns = "", []
-                    async for m in client.iter_messages("@SpamBot", limit=5):
-                        if not m.out and m.message:
+                    async for m in client.iter_messages("@SpamBot", limit=1, from_user="@SpamBot"):
+                        if m.message:
                             reply = m.message
                             if m.reply_markup:
                                 try:
-                                    for row in m.reply_markup.rows:
-                                        for b in row.buttons:
-                                            if hasattr(b, "text"): btns.append(b.text)
-                                except AttributeError:
+                                    from telethon.tl.types import ReplyKeyboardMarkup, KeyboardButtonRow, KeyboardButton
+                                    if hasattr(m.reply_markup, "rows"):
+                                        for row in m.reply_markup.rows:
+                                            for b in row.buttons:
+                                                if hasattr(b, "text"):
+                                                    btns.append(b.text)
+                                except Exception:
                                     pass
                             break
                     await client.disconnect()
@@ -1739,14 +1742,16 @@ class MainWindow(QMainWindow):
         threading.Thread(target=_run, daemon=True).start()
 
     def _apply_spam_reply(self, acc, reply, btns):
-        phone = acc.get("phone", "")
+        phone = acc.get("phone", "") if acc else ""
         for entry in self._spamblock_log:
             if (entry.get("acc") or {}).get("phone") == phone:
                 entry["reply"] = reply
                 entry["buttons"] = btns
                 self._apply_spamblock_ui(entry)
                 return
-        self._apply_spamblock_ui({"reply": reply, "buttons": btns, "stopped_at": ""})
+        dummy = {"reply": reply, "buttons": btns, "stopped_at": "", "acc": acc}
+        self._spamblock_log.append(dummy)
+        self._apply_spamblock_ui(dummy)
 
     def _paused(self):
         return getattr(self, "__paused", False)
