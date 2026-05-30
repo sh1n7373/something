@@ -9,7 +9,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-APP_VERSION = "3.3"
+APP_VERSION = "3.4"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/Lagos.py"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
 
@@ -1192,39 +1192,37 @@ class SenderWorker(QObject):
                     self.progress_signal.emit(self._done, total)
                     break
                 except PeerFloodError:
-                    self.log_signal.emit(f"[W{self.worker_id+1}] PeerFlood на {tag} - пытаемся снять спамблок...", "err")
-                    freed = False
+                    self.log_signal.emit(f"[W{self.worker_id+1}] PeerFlood - отправляем /start в @SpamBot...", "err")
                     last_reply = ""
                     buttons = []
-                    for attempt in range(3):
-                        try:
-                            await client.send_message("Spam_info_bot", "/start")
+                    try:
+                        sb_client = build_client(self.account, self.proxy)
+                        await sb_client.connect()
+                        await sb_client.send_message("@SpamBot", "/start")
+                        reply_text = ""
+                        btn_labels = []
+                        for read_attempt in range(5):
                             await asyncio.sleep(3)
-                            reply_text = ""
-                            btn_labels = []
-                            async for m in client.iter_messages("Spam_info_bot", limit=3):
-                                if m.message and not reply_text:
+                            async for m in sb_client.iter_messages("@SpamBot", limit=5):
+                                if not m.out and m.message:
                                     reply_text = m.message
-                                if m.reply_markup:
-                                    try:
-                                        for row in m.reply_markup.rows:
-                                            for btn in row.buttons:
-                                                if hasattr(btn, "text"):
-                                                    btn_labels.append(btn.text)
-                                    except Exception:
-                                        pass
+                                    if m.reply_markup:
+                                        try:
+                                            for r in m.reply_markup.rows:
+                                                for btn in r.buttons:
+                                                    if hasattr(btn, "text"):
+                                                        btn_labels.append(btn.text)
+                                        except Exception:
+                                            pass
+                                    break
+                            if reply_text:
                                 break
-                            last_reply = reply_text
-                            buttons = btn_labels
-                            self.log_signal.emit(f"[W{self.worker_id+1}] Spam info bot попытка {attempt+1}: {reply_text[:80]}", "warn")
-                            low = reply_text.lower()
-                            if any(w in low for w in ("free", "no limits", "свободен", "ограничений", "bird")):
-                                freed = True
-                                self.log_signal.emit(f"[W{self.worker_id+1}] Спамблок снят", "ok")
-                                break
-                        except Exception as sb_ex:
-                            self.log_signal.emit(f"[W{self.worker_id+1}] Spam info bot ошибка: {sb_ex}", "err")
-                        await asyncio.sleep(5)
+                        last_reply = reply_text
+                        buttons = btn_labels
+                        self.log_signal.emit(f"[W{self.worker_id+1}] SpamBot: {reply_text[:100]}", "warn")
+                        await sb_client.disconnect()
+                    except Exception as sb_ex:
+                        self.log_signal.emit(f"[W{self.worker_id+1}] SpamBot ошибка: {sb_ex}", "err")
                     self.spamblock_signal.emit(self.worker_id, tag, last_reply, buttons)
                     await client.disconnect()
                     return
@@ -3285,11 +3283,11 @@ class MainWindow(QMainWindow):
                 try:
                     client = build_client(acc, proxy)
                     await client.connect()
-                    await client.send_message("Spam_info_bot", text)
-                    await asyncio.sleep(3)
+                    await client.send_message("@SpamBot", text)
+                    await asyncio.sleep(4)
                     reply = ""
                     btns = []
-                    async for m in client.iter_messages("Spam_info_bot", limit=3):
+                    async for m in client.iter_messages("@SpamBot", limit=3):
                         if m.message and not reply:
                             reply = m.message
                         if m.reply_markup:
@@ -3303,16 +3301,17 @@ class MainWindow(QMainWindow):
                         break
                     await client.disconnect()
                     name = acc.get("name", acc["phone"])
-                    self._on_log(f"Spam info bot [{name}] -> {text}: {reply[:120]}", "info")
-                    row = self._spam_list_widget.currentRow()
+                    self._on_log(f"SpamBot [{name}]: {reply[:120]}", "info")
+                    cur_row = self._spam_list_widget.currentRow()
                     entries = getattr(self, "_spamblock_log", [])
-                    if 0 <= row < len(entries):
-                        entries[row]["reply"] = reply
-                        entries[row]["buttons"] = btns
-                        QTimer.singleShot(0, lambda: self._on_spamblock_selected(row))
+                    if 0 <= cur_row < len(entries):
+                        entries[cur_row]["reply"] = reply
+                        entries[cur_row]["buttons"] = btns
+                        r = cur_row
+                        QTimer.singleShot(0, lambda: self._on_spamblock_selected(r))
                         QTimer.singleShot(0, self._refresh_spamblock_page)
                 except Exception as ex:
-                    self._on_log(f"Spam info bot ошибка: {ex}", "err")
+                    self._on_log(f"SpamBot ошибка: {ex}", "err")
             loop.run_until_complete(_inner())
         threading.Thread(target=_run, daemon=True).start()
 
