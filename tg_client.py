@@ -293,6 +293,53 @@ class SenderWorker(QObject):
         return last_reply, buttons
 
 
+class SpamBotLoader(QObject):
+    result_signal = pyqtSignal(str, list)
+    error_signal  = pyqtSignal(str)
+    sent_signal   = pyqtSignal()
+
+    def __init__(self, account, text, proxy=None):
+        super().__init__()
+        self.account = account
+        self.text    = text
+        self.proxy   = proxy
+
+    def run(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(self._load())
+
+    async def _load(self):
+        _session_wal(self.account["phone"], chat_mode=True)
+        try:
+            client = build_client(self.account, self.proxy, chat_mode=True)
+            await client.connect()
+            if not await client.is_user_authorized():
+                self.error_signal.emit("Аккаунт не авторизован")
+                await client.disconnect()
+                return
+            await client.send_message("@SpamBot", self.text)
+            self.sent_signal.emit()
+            reply, btns = "", []
+            for _ in range(10):
+                await asyncio.sleep(2)
+                async for m in client.iter_messages("@SpamBot", limit=5):
+                    if not m.out and m.message:
+                        reply = m.message
+                        if m.reply_markup and hasattr(m.reply_markup, "rows"):
+                            for row in m.reply_markup.rows:
+                                for b in row.buttons:
+                                    if hasattr(b, "text"):
+                                        btns.append(b.text)
+                        break
+                if reply:
+                    break
+            await client.disconnect()
+            self.result_signal.emit(reply, btns)
+        except Exception as ex:
+            self.error_signal.emit(str(ex))
+
+
 class ChatLoader(QObject):
     messages_loaded = pyqtSignal(str, list)
     error_signal    = pyqtSignal(str)
@@ -304,7 +351,9 @@ class ChatLoader(QObject):
         self.proxy     = proxy
 
     def run(self):
-        asyncio.new_event_loop().run_until_complete(self._load())
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(self._load())
 
     async def _load(self):
         _session_wal(self.account["phone"], chat_mode=True)
