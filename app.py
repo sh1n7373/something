@@ -688,7 +688,7 @@ class MainWindow(QMainWindow):
 
         right = QVBoxLayout()
         right.addWidget(section_label("ТЕКСТ СООБЩЕНИЯ"))
-        hint_p = QLabel("Замены в тексте:  $token - токен   [job] - должность(хайринг)")
+        hint_p = QLabel("Замены в тексте:  $token - токен     [job] - должность(хайринг)")
         hint_p.setStyleSheet("color: #4e5a78; font-size: 11px;")
         right.addWidget(hint_p)
         self.paste_edit = QTextEdit()
@@ -712,11 +712,17 @@ class MainWindow(QMainWindow):
             self.paste_list.addItem(f"  {i+1}.  {p[:48].replace(chr(10), ' ')}")
 
     def _refresh_pastes_keep(self, row):
+        cur = self.paste_edit.textCursor()
+        pos = cur.position()
         self.paste_list.blockSignals(True)
+        self.paste_edit.blockSignals(True)
         self._refresh_pastes()
         self.paste_list.blockSignals(False)
         if row < self.paste_list.count():
             self.paste_list.setCurrentRow(row)
+        self.paste_edit.blockSignals(False)
+        cur.setPosition(min(pos, len(self.paste_edit.toPlainText())))
+        self.paste_edit.setTextCursor(cur)
 
     def _load_paste(self, row):
         if 0 <= row < len(self.data["pastes"]):
