@@ -7,8 +7,10 @@ from PyQt5.QtCore import (
     QEasingCurve, pyqtSignal, pyqtProperty, QRect, QPointF, QObject, QSize
 )
 from PyQt5.QtGui import (
-    QPainter, QColor, QLinearGradient, QPen, QFont, QIcon
+    QPainter, QColor, QLinearGradient, QPen, QFont, QIcon, QPixmap
 )
+import threading
+import urllib.request
 
 from theme import (
     ANIM_FAST, ANIM_NORMAL, ANIM_SLOW, SIDEBAR_OFFSET,
@@ -448,6 +450,7 @@ class ProxyStatusDot(QWidget):
 
 
 class ProxyRowWidget(QWidget):
+    _flag_loaded = pyqtSignal(bytes)
     _status_styles = {
         "ok":       ("OK",  "color: #6a9e80; font-size: 11px; background: transparent; min-width: 40px;"),
         "err":      ("ERR", "color: #b06070; font-size: 11px; background: transparent; min-width: 40px;"),
@@ -456,6 +459,7 @@ class ProxyRowWidget(QWidget):
 
     def __init__(self, proxy_data, idx, parent=None):
         super().__init__(parent)
+        self._flag_loaded.connect(self._apply_flag_pixmap)
         self.proxy_data = proxy_data
         self.idx = idx
         self.setFixedHeight(36)
@@ -487,15 +491,46 @@ class ProxyRowWidget(QWidget):
         self._status_lbl.setStyleSheet("font-size: 11px; background: transparent; min-width: 40px;")
         lay.addWidget(self._status_lbl)
 
+        self._flag_lbl = QLabel("")
+        self._flag_lbl.setFixedSize(28, 20)
+        self._flag_lbl.setScaledContents(True)
+        self._flag_lbl.setStyleSheet("background: transparent;")
+        lay.addWidget(self._flag_lbl)
+
         self._active_lbl = QLabel("")
         self._active_lbl.setStyleSheet("color: #4a6fa5; font-size: 11px; font-weight: 700; background: transparent; min-width: 50px;")
         lay.addWidget(self._active_lbl)
+
+    def _load_flag_png(self, code):
+        def _fetch():
+            try:
+                url = f"https://flagcdn.com/w40/{code.lower()}.png"
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=5) as r:
+                    data = r.read()
+                self._flag_loaded.emit(data)
+            except Exception:
+                pass
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _apply_flag_pixmap(self, data):
+        px = QPixmap()
+        px.loadFromData(data)
+        if not px.isNull():
+            self._flag_lbl.setPixmap(px.scaled(28, 20, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
     def set_status(self, status, info=""):
         self._dot.set_status(status)
         text, style = self._status_styles.get(status, ("", "font-size: 11px; background: transparent; min-width: 40px;"))
         self._status_lbl.setText(text)
         self._status_lbl.setStyleSheet(style)
+        self._flag_lbl.clear()
+        if status == "ok" and info:
+            code = ""
+            if "|" in info:
+                code = info.split("|", 1)[1].strip()
+            if code and len(code) == 2:
+                self._load_flag_png(code)
 
     def set_active(self, active):
         self._active_lbl.setText("АКТИВНЫЙ" if active else "")
