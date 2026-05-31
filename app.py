@@ -440,7 +440,7 @@ class MainWindow(QMainWindow):
         if hasattr(page, "fade_in"):
             page.fade_in()
         self._stack.setCurrentIndex(idx)
-        refresh = {3: self._refresh_sender_page, 6: self._refresh_chats_accounts, 7: self._refresh_spamblock_page}
+        refresh = {3: self._refresh_sender_page, 7: self._refresh_chats_accounts, 8: self._on_switch_spamblock}
         if idx in refresh:
             refresh[idx]()
 
@@ -527,7 +527,7 @@ class MainWindow(QMainWindow):
 
         right.addWidget(section_label("СПИСКОМ"))
         self.rec_bulk = QPlainTextEdit()
-        self.rec_bulk.setPlaceholderText("@user1 - $TOKEN1\n@user2")
+        self.rec_bulk.setPlaceholderText("@user1 - $TOKEN1\n@user2 - [job title]")
         self.rec_bulk.setMaximumHeight(130)
         right.addWidget(self.rec_bulk)
         addm = AnimatedButton("Добавить всех")
@@ -688,6 +688,9 @@ class MainWindow(QMainWindow):
 
         right = QVBoxLayout()
         right.addWidget(section_label("ТЕКСТ СООБЩЕНИЯ"))
+        hint_p = QLabel("Замены в тексте:  $token - токен   [job] - должность(хайринг)")
+        hint_p.setStyleSheet("color: #4e5a78; font-size: 11px;")
+        right.addWidget(hint_p)
         self.paste_edit = QTextEdit()
         self.paste_edit.setPlaceholderText("Введите текст сообщения...")
         self.paste_edit.textChanged.connect(lambda: self._paste_save_timer.start(800))
