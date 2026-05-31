@@ -32,6 +32,7 @@ _SKIP_ERRORS = (
     "nobody", "you have been blocked", "user is blocked",
     "chat write forbidden", "not in the chat", "banned",
     "deactivated", "need to buy", "paid", "slowmode",
+    "allow_payment_required", "no user has", "as username",
 )
 
 
@@ -320,8 +321,28 @@ class SenderWorker(QObject):
                     if "database is locked" in err_str:
                         self._log("База заблокирована, ждём...", "warn")
                         await asyncio.sleep(5)
+                    elif "disconnected" in err_str or "not connected" in err_str:
+                        self._log(f"Соединение потеряно на {tag}, переподключаем...", "warn")
+                        attempt = 0
+                        while True:
+                            if self._stop:
+                                await client.disconnect()
+                                return
+                            await asyncio.sleep(4)
+                            attempt += 1
+                            try:
+                                await client.connect()
+                                self._log(f"Соединение восстановлено, продолжаем с {tag}", "ok")
+                                break
+                            except Exception:
+                                self._log(f"Переподключение {attempt}...", "warn")
                     elif any(e in err_str for e in _SKIP_ERRORS):
-                        self._log(f"Скип {tag}: {ex}", "warn")
+                        if "allow_payment_required" in err_str:
+                            self._log(f"Скип {tag}: требуется оплата", "warn")
+                        elif "no user has" in err_str or "as username" in err_str:
+                            self._log(f"Скип {tag}: тег не существует", "warn")
+                        else:
+                            self._log(f"Скип {tag}: {ex}", "warn")
                         self.failed_signal.emit(tag)
                         self.failed_detail_signal.emit(tag, str(ex))
                         self._done += 1
