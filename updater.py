@@ -56,7 +56,7 @@ def _do_update(parent):
             (base / filename).write_bytes(data)
         QMessageBox.information(
             parent, "Обновление загружено",
-            "Файлы обновлены. Запусти install.bat чтобы пересобрать приложение."
+            "Для обновления запусти install.bat"
         )
         sys.exit(0)
     except Exception as e:
