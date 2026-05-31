@@ -18,7 +18,7 @@ from storage import (
     load_data, save_data, APP_DIR,
     recipient_tag, recipient_token, parse_recipient_line, parse_recipients_bulk
 )
-from tg_client import build_client, SenderWorker, ChatLoader, ProxyChecker, SESSION_DIR
+from tg_client import build_client, SenderWorker, ChatLoader, SpamBotLoader, ProxyChecker, SESSION_DIR
 from widgets import (
     FadeWidget, SidebarButton, AnimatedButton, AnimatedProgressBar,
     StatCard, StyledSpinBox, StyledTimeEdit, ProxyRowWidget,
@@ -141,8 +141,9 @@ class AuthDialog(QDialog):
         asyncio.run_coroutine_threadsafe(_go(), self._loop)
 
     def _tick(self):
-        self._dots = (self._dots + 1) % 4
-        self.status_lbl.setText("Подключаемся к Telegram" + "." * self._dots)
+        frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        self._dots = (self._dots + 1) % len(frames)
+        self.status_lbl.setText(f"{frames[self._dots]}  Подключаемся к Telegram...")
 
     def _show_code_step(self):
         self._dot_timer.stop()
@@ -241,6 +242,50 @@ def _acc_label(acc):
 
 def _proxy_label(p):
     return f"{p['type'].upper()}  {p['host']}:{p['port']}"
+
+
+class SpamWorker(QObject):
+    result_signal = pyqtSignal(str, list)
+    error_signal  = pyqtSignal(str)
+
+    def __init__(self, acc, text, proxy):
+        super().__init__()
+        self.acc   = acc
+        self.text  = text
+        self.proxy = proxy
+
+    def run(self):
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(self._inner())
+
+    async def _inner(self):
+        try:
+            from tg_client import build_client
+            client = build_client(self.acc, self.proxy, chat_mode=True)
+            await client.connect()
+            if not await client.is_user_authorized():
+                self.error_signal.emit("Аккаунт не авторизован")
+                await client.disconnect()
+                return
+            await client.send_message("@SpamBot", self.text)
+            reply, btns = "", []
+            for _ in range(10):
+                await asyncio.sleep(2)
+                async for m in client.iter_messages("@SpamBot", limit=5):
+                    if not m.out and m.message:
+                        reply = m.message
+                        if m.reply_markup and hasattr(m.reply_markup, "rows"):
+                            for row in m.reply_markup.rows:
+                                for b in row.buttons:
+                                    if hasattr(b, "text"):
+                                        btns.append(b.text)
+                        break
+                if reply:
+                    break
+            await client.disconnect()
+            self.result_signal.emit(reply, btns)
+        except Exception as ex:
+            self.error_signal.emit(str(ex))
 
 
 class MainWindow(QMainWindow):
@@ -1491,13 +1536,30 @@ class MainWindow(QMainWindow):
         recs = getattr(self, "_chat_recs", self.data.get("recipients", []))
         if row >= len(recs): return
         tag = recipient_tag(recs[row])
-        self.chat_view.setPlainText("Загружаем...")
+        self._chat_dots = 0
+        if not hasattr(self, "_chat_timer"):
+            self._chat_timer = QTimer()
+            self._chat_timer.timeout.connect(self._tick_chat)
+        self._chat_timer.start(80)
+        self.chat_view.setPlainText("⠋  Загружаем переписку...")
         loader = ChatLoader(self.data["accounts"][acc_idx], tag, proxy=self._get_app_proxy())
         loader.messages_loaded.connect(self._on_chat_loaded)
-        loader.error_signal.connect(lambda e: self.chat_view.setPlainText(f"Ошибка: {e}"))
+        loader.error_signal.connect(self._on_chat_error)
         threading.Thread(target=loader.run, daemon=True).start()
 
+    def _tick_chat(self):
+        frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        self._chat_dots = (self._chat_dots + 1) % len(frames)
+        self.chat_view.setPlainText(f"{frames[self._chat_dots]}  Загружаем переписку...")
+
+    def _on_chat_error(self, e):
+        if hasattr(self, "_chat_timer"):
+            self._chat_timer.stop()
+        self.chat_view.setPlainText(f"Ошибка: {e}")
+
     def _on_chat_loaded(self, tag, messages):
+        if hasattr(self, "_chat_timer"):
+            self._chat_timer.stop()
         self.chat_view.clear()
         if not messages:
             self.chat_view.setPlainText("Нет сообщений"); return
@@ -1624,6 +1686,11 @@ class MainWindow(QMainWindow):
         if cur >= 0:
             self._spam_acc_combo.setCurrentIndex(min(cur, self._spam_acc_combo.count() - 1))
 
+    def _on_switch_spamblock(self):
+        self._refresh_spamblock_page()
+        if self._spamblock_log:
+            self._apply_spamblock_ui(self._spamblock_log[-1])
+
     def _on_spamblock(self, wid, stopped_tag, reply, buttons):
         acc = None
         if wid < len(self._worker_cards):
@@ -1637,8 +1704,8 @@ class MainWindow(QMainWindow):
             "time": datetime.now().strftime("%H:%M:%S"),
         }
         self._spamblock_log.append(entry)
-        self._apply_spamblock_ui(entry)
         self._refresh_spamblock_page()
+        self._apply_spamblock_ui(entry)
 
     def _apply_spamblock_ui(self, entry):
         if not hasattr(self, "_spam_reply"): return
@@ -1684,74 +1751,59 @@ class MainWindow(QMainWindow):
 
     def _do_spam_send(self, acc, text):
         proxy = self._get_app_proxy()
+        self._spam_loader = SpamBotLoader(acc, text, proxy)
+        self._spam_loader.result_signal.connect(self._on_spambot_result)
+        self._spam_loader.error_signal.connect(self._on_spambot_error)
+        self._spam_loader.sent_signal.connect(self._on_spambot_sent)
+        self._spam_status_dots = 0
+        self._spam_status_phase = 0
+        if not hasattr(self, "_spam_status_timer"):
+            self._spam_status_timer = QTimer()
+            self._spam_status_timer.timeout.connect(self._tick_spam_status)
+        self._spam_status_timer.start(500)
+        self._spam_reply.setPlainText("⠋  Отправляю сообщение...")
+        threading.Thread(target=self._spam_loader.run, daemon=True).start()
 
-        def _run():
-            loop = asyncio.new_event_loop()
+    def _tick_spam_status(self):
+        frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        self._spam_status_dots = (self._spam_status_dots + 1) % len(frames)
+        spin = frames[self._spam_status_dots]
+        if self._spam_status_phase == 0:
+            self._spam_reply.setPlainText(f"{spin}  Отправляю сообщение...")
+        else:
+            self._spam_reply.setPlainText(f"{spin}  Жду ответа от SpamBot...")
 
-            async def _inner():
-                try:
-                    from tg_client import _session_wal, SESSION_DIR, SOCKS_AVAILABLE
-                    _session_wal(acc["phone"], chat_mode=True)
-                    base = acc["phone"].replace("+", "")
-                    sess_path = SESSION_DIR / (base + "_chat.session")
-                    sess = str(SESSION_DIR / (base + ("_chat" if sess_path.exists() else "")))
+    def _on_spambot_sent(self):
+        self._spam_status_phase = 1
 
-                    from telethon import TelegramClient
-                    if proxy and SOCKS_AVAILABLE:
-                        import socks
-                        ptype = proxy.get("type", "socks5").lower()
-                        pt = {"socks5": socks.SOCKS5, "socks4": socks.SOCKS4}.get(ptype, socks.HTTP)
-                        client = TelegramClient(sess, acc["api_id"], acc["api_hash"],
-                                                proxy=(pt, proxy["host"], int(proxy["port"]), True,
-                                                       proxy.get("user") or None, proxy.get("password") or None))
-                    else:
-                        client = TelegramClient(sess, acc["api_id"], acc["api_hash"])
+    def _on_spambot_result(self, reply, btns):
+        if hasattr(self, "_spam_status_timer"):
+            self._spam_status_timer.stop()
+        if not hasattr(self, "_spam_reply"): return
+        self._spam_reply.setPlainText(reply if reply else "Нет ответа")
+        self._spam_tag_lbl.setText("")
+        self._clear_spam_btns()
+        if btns:
+            for btn_text in btns:
+                b = AnimatedButton(btn_text)
+                b.setMinimumHeight(44)
+                b.clicked.connect(lambda _, t=btn_text: self._do_spam_send(
+                    self.data["accounts"][self._spam_acc_combo.currentIndex()], t
+                ))
+                self._spam_btns_lay.addWidget(b)
+        else:
+            no = QLabel("Нет кнопок от Spam info bot")
+            no.setStyleSheet("color: #4e5a78; font-size: 12px;")
+            self._spam_btns_lay.addWidget(no)
 
-                    await client.connect()
-                    if not await client.is_user_authorized():
-                        QTimer.singleShot(0, lambda: self._on_log("SpamBot: аккаунт не авторизован", "err"))
-                        await client.disconnect(); return
-
-                    await client.send_message("@SpamBot", text)
-                    await asyncio.sleep(8)
-                    reply, btns = "", []
-                    async for m in client.iter_messages("@SpamBot", limit=1, from_user="@SpamBot"):
-                        if m.message:
-                            reply = m.message
-                            if m.reply_markup:
-                                try:
-                                    from telethon.tl.types import ReplyKeyboardMarkup, KeyboardButtonRow, KeyboardButton
-                                    if hasattr(m.reply_markup, "rows"):
-                                        for row in m.reply_markup.rows:
-                                            for b in row.buttons:
-                                                if hasattr(b, "text"):
-                                                    btns.append(b.text)
-                                except Exception:
-                                    pass
-                            break
-                    await client.disconnect()
-                    name, r, b, a = acc.get("name", acc["phone"]), reply, list(btns), acc
-                    QTimer.singleShot(0, lambda: self._on_log(f"SpamBot [{name}]: {r[:120]}", "info"))
-                    QTimer.singleShot(0, lambda: self._apply_spam_reply(a, r, b))
-                except Exception as ex:
-                    err = str(ex)
-                    QTimer.singleShot(0, lambda: self._on_log(f"SpamBot ошибка: {err}", "err"))
-
-            loop.run_until_complete(_inner())
-
-        threading.Thread(target=_run, daemon=True).start()
+    def _on_spambot_error(self, err):
+        if hasattr(self, "_spam_status_timer"):
+            self._spam_status_timer.stop()
+        if not hasattr(self, "_spam_reply"): return
+        self._spam_reply.setPlainText(f"Ошибка: {err}")
 
     def _apply_spam_reply(self, acc, reply, btns):
-        phone = acc.get("phone", "") if acc else ""
-        for entry in self._spamblock_log:
-            if (entry.get("acc") or {}).get("phone") == phone:
-                entry["reply"] = reply
-                entry["buttons"] = btns
-                self._apply_spamblock_ui(entry)
-                return
-        dummy = {"reply": reply, "buttons": btns, "stopped_at": "", "acc": acc}
-        self._spamblock_log.append(dummy)
-        self._apply_spamblock_ui(dummy)
+        self._on_spambot_result(reply, btns)
 
     def _paused(self):
         return getattr(self, "__paused", False)
