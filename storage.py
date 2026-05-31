@@ -7,7 +7,7 @@ import sys
 def _get_app_dir():
     if getattr(sys, "frozen", False):
         return Path(sys.executable).parent
-    return Path(__file__).parent
+    return Path(file).parent
 
 
 APP_DIR = _get_app_dir()
@@ -35,6 +35,59 @@ _DICT_KEYS = {"chat_log", "account_proxies", "account_recipients"}
 def load_data():
     if DATA_FILE.exists():
         try:
+            d = json.loads(DATA_FILE.read_text(encoding="utf-8"))
+            for key, default in _DEFAULTS.items():
+                if key not in d:
+                    d[key] = default
+            return d
+        except (json.JSONDecodeError, OSError):
+            pass
+    return dict(_DEFAULTS)
+
+
+def save_data(data):
+    DATA_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def recipient_tag(r):
+    if isinstance(r, dict):
+        return r.get("tag", "")
+    return r
+
+
+def recipient_token(r):
+    if isinstance(r, dict):
+        return r.get("token", "")
+    return ""
+
+
+def apply_token(text, token):
+    text = re.sub(r'\$token', token, text, flags=re.IGNORECASE)
+    job = re.sub(r'^\[(.+)\]$', r'\1', token).strip() if token else ''
+    text = re.sub(r'\[job\]', job, text, flags=re.IGNORECASE)
+    return text
+
+
+def parse_recipient_line(line):
+    line = line.strip()
+    m = re.match(r'^(@?\S+)\s*[-]\s*(.+)$', line)
+    if m:
+        tag, token = m.group(1).strip(), m.group(2).strip()
+    else:
+        tag, token = line, ""
+    if not tag.startswith("@"):
+        tag = "@" + tag
+    return tag, token
+
+
+def parse_recipients_bulk(text):
+    result = []
+    for line in text.splitlines():
+        line = line.strip()
+        if line:
+            tag, token = parse_recipient_line(line)
+            result.append({"tag": tag, "token": token})
+    return result        try:
             d = json.loads(DATA_FILE.read_text(encoding="utf-8"))
             for key, default in _DEFAULTS.items():
                 if key not in d:
