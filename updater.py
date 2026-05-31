@@ -4,7 +4,7 @@ import urllib.request
 from pathlib import Path
 from PyQt5.QtWidgets import QMessageBox
 
-APP_VERSION = "4.3"
+APP_VERSION = "4.4"
 GITHUB_BASE_URL    = "https://raw.githubusercontent.com/sh1n7373/something/main/"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
 GITHUB_FILES = [
