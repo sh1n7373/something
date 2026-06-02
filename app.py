@@ -300,6 +300,7 @@ class MainWindow(QMainWindow):
         self._worker_threads = {}
         self._worker_totals = {}
         self._worker_paused = {}
+        self._worker_timers = {}
         self._worker_cards  = []
         self._proxy_status  = {}
         self._proxy_rows    = []
@@ -1039,7 +1040,7 @@ class MainWindow(QMainWindow):
         gl.setSpacing(32)
 
         for attr, lbl_text, mn, mx, default, suffix, hint_text in [
-            ("interval_spin",     "ИНТЕРВАЛ СООБЩЕНИЙ (МИН)",  0, 60,   2, " мин", None),
+            ("interval_spin",     "ИНТЕРВАЛ СООБЩЕНИЙ (МИН)",    0, 60,   2, " мин", None),
             ("tag_interval_spin", "ИНТЕРВАЛ МЕЖДУ ТЕГАМИ (МИН)", 0, 1440, 0, " мин", "0 = без интервала"),
         ]:
             col = QVBoxLayout()
@@ -1053,10 +1054,11 @@ class MainWindow(QMainWindow):
             spin.valueChanged.connect(self._update_eta)
             setattr(self, attr, spin)
             col.addWidget(spin)
-            if hint_text:
-                h2 = QLabel(hint_text)
-                h2.setStyleSheet("color: #3a4a68; font-size: 11px; background: transparent;")
-                col.addWidget(h2)
+            h2 = QLabel(hint_text if hint_text else "")
+            h2.setStyleSheet("color: #3a4a68; font-size: 11px; background: transparent;")
+            h2.setFixedHeight(16)
+            col.addWidget(h2)
+            col.addStretch()
             gl.addLayout(col)
 
         time_col = QVBoxLayout()
@@ -1065,7 +1067,12 @@ class MainWindow(QMainWindow):
         self.start_time_edit = StyledTimeEdit()
         self.start_time_edit.setTime(QTime.currentTime())
         self.start_time_edit.setFixedWidth(160)
+        self.start_time_edit.timeChanged.connect(self._update_eta)
         time_col.addWidget(self.start_time_edit)
+        h3 = QLabel("")
+        h3.setFixedHeight(16)
+        time_col.addWidget(h3)
+        time_col.addStretch()
         gl.addLayout(time_col)
 
         eta_col = QVBoxLayout()
@@ -1152,6 +1159,7 @@ class MainWindow(QMainWindow):
         rec_combo.addItem("База")
         for key in self.data.get("recipient_dbs", {}):
             rec_combo.addItem(key)
+        rec_combo.currentIndexChanged.connect(self._update_eta)
 
         for lbl_text, widget in [("АККАУНТ", acc_combo), ("ПРОКСИ", proxy_combo), ("ТЕГИ (БАЗА)", rec_combo)]:
             col = QVBoxLayout()
@@ -1278,6 +1286,7 @@ class MainWindow(QMainWindow):
             proxy=proxy,
             tag_interval_min=self.tag_interval_spin.value(),
             worker_id=idx,
+            resume_from=self.data.get("worker_last_tag", {}).get(str(idx)),
         )
         worker.log_signal.connect(self._on_log)
         worker.progress_signal.connect(lambda d, t, i=idx: self._on_worker_progress(i, d, t))
@@ -1286,6 +1295,7 @@ class MainWindow(QMainWindow):
         worker.failed_detail_signal.connect(self._on_failed_detail)
         worker.current_tag_signal.connect(self._on_worker_tag)
         worker.spamblock_signal.connect(self._on_spamblock)
+        worker.tag_sent_signal.connect(self._on_tag_sent)
 
         self._workers[idx] = worker
         self._worker_totals[idx] = len(recs) * len(pastes)
@@ -1299,7 +1309,27 @@ class MainWindow(QMainWindow):
 
         t = threading.Thread(target=worker.run, daemon=True)
         self._worker_threads[idx] = t
-        t.start()
+
+        now = QTime.currentTime()
+        target = self.start_time_edit.time()
+        now_dt = datetime.now()
+        target_dt = now_dt.replace(hour=target.hour(), minute=target.minute(), second=0, microsecond=0)
+        if target_dt <= now_dt:
+            target_dt = target_dt.replace(day=target_dt.day + 1)
+        secs = int((target_dt - now_dt).total_seconds())
+        if secs > 10:
+            mins, rem = divmod(secs, 60)
+            time_str = f"{mins} мин {rem} сек" if mins > 0 else f"{rem} сек"
+            self._on_log(f"[W{idx+1}] Старт в {target.toString('HH:mm')} (через {time_str})", "info")
+            def _delayed_start(thread=t):
+                thread.start()
+            timer = threading.Timer(secs, _delayed_start)
+            timer.daemon = True
+            self._worker_timers[idx] = timer
+            timer.start()
+        else:
+            self._worker_timers.pop(idx, None)
+            t.start()
 
         cd["start_btn"].setText(f"Остановить поток {idx + 1}")
         cd["pause_btn"].setEnabled(True)
@@ -1311,6 +1341,9 @@ class MainWindow(QMainWindow):
         self._run_btn.setText("Остановить все")
 
     def _stop_worker(self, idx):
+        timer = self._worker_timers.pop(idx, None)
+        if timer:
+            timer.cancel()
         if self._workers.get(idx):
             self._workers[idx].stop()
             self._workers[idx] = None
@@ -1322,6 +1355,10 @@ class MainWindow(QMainWindow):
             cd["pause_btn"].setText("Пауза")
             cd["cur_tag_lbl"].setText("")
         self._on_log(f"[W{idx+1}] Остановлен", "warn")
+        if not any(w for w in self._workers.values()):
+            self._run_btn.setText("Начать отписи")
+            self.progress_bar.hide()
+            self._pause_btn.hide()
 
     def _toggle_worker_pause(self, idx):
         if not self._workers.get(idx): return
@@ -1366,6 +1403,24 @@ class MainWindow(QMainWindow):
     def _on_worker_tag(self, wid, tag):
         if wid < len(self._worker_cards):
             self._worker_cards[wid]["cur_tag_lbl"].setText(f"-> {tag}")
+        if "worker_last_tag" not in self.data:
+            self.data["worker_last_tag"] = {}
+        self.data["worker_last_tag"][str(wid)] = tag
+        save_data(self.data)
+
+    def _on_tag_sent(self, wid, tag):
+        cd = self._worker_cards[wid] if wid < len(self._worker_cards) else None
+        key = cd["rec_combo"].currentText() if cd and cd["rec_combo"].currentIndex() > 0 else None
+        if key:
+            recs = self.data.get("recipient_dbs", {}).get(key, [])
+            self.data["recipient_dbs"][key] = [r for r in recs if (r.get("tag") if isinstance(r, dict) else r) != tag]
+        else:
+            self.data["recipients"] = [r for r in self.data.get("recipients", []) if (r.get("tag") if isinstance(r, dict) else r) != tag]
+        if "worker_last_tag" not in self.data:
+            self.data["worker_last_tag"] = {}
+        self.data["worker_last_tag"].pop(str(wid), None)
+        save_data(self.data)
+        self._refresh_recipients()
 
     def _on_worker_progress(self, wid, done_delta, total_delta):
         self._done_msgs = sum(getattr(w, "_done", 0) for w in self._workers.values() if w)
@@ -1384,6 +1439,8 @@ class MainWindow(QMainWindow):
             cd["pause_btn"].setEnabled(False)
             cd["pause_btn"].setText("Пауза")
             cd["cur_tag_lbl"].setText("")
+        self.data.setdefault("worker_last_tag", {}).pop(str(idx), None)
+        save_data(self.data)
         self._on_log(f"[W{idx+1}] Завершён", "ok")
         if any(w for w in self._workers.values()):
             self._run_btn.setText("Остановить все")
@@ -1437,17 +1494,30 @@ class MainWindow(QMainWindow):
     def _update_eta(self):
         if not self._worker_cards:
             self.eta_lbl.setText(""); return
-        total = 0
+        total_tags = 0
+        total_msgs = 0
         for idx, cd in enumerate(self._worker_cards):
             pastes = self._get_worker_pastes(idx)
             key = cd["rec_combo"].currentText() if cd["rec_combo"].currentIndex() > 0 else None
             recs = self.data.get("recipient_dbs", {}).get(key, self.data.get("recipients", [])) if key else self.data.get("recipients", [])
-            total += len(recs) * len(pastes)
-        if not total:
+            total_tags += len(recs)
+            total_msgs += len(recs) * len(pastes)
+        if not total_msgs:
             self.eta_lbl.setText(""); return
-        remaining = max(0, total - self._done_msgs)
-        end_dt = datetime.now() + timedelta(minutes=remaining * self.interval_spin.value())
-        self.eta_lbl.setText(f"Конец ~{end_dt.strftime('%H:%M')}  {total} сообщений")
+        interval = self.interval_spin.value()
+        tag_interval = self.tag_interval_spin.value()
+        done = self._done_msgs
+        remaining_msgs = max(0, total_msgs - done)
+        remaining_tags = max(0, total_tags - (done // max(1, total_msgs // max(1, total_tags))))
+        mins = remaining_msgs * interval + remaining_tags * tag_interval
+        now = datetime.now()
+        target = self.start_time_edit.time()
+        start_dt = now.replace(hour=target.hour(), minute=target.minute(), second=0, microsecond=0)
+        if start_dt < now:
+            start_dt = start_dt.replace(day=start_dt.day + 1)
+        base_dt = max(now, start_dt)
+        end_dt = base_dt + timedelta(minutes=mins)
+        self.eta_lbl.setText(f"Конец ~{end_dt.strftime('%H:%M')}  {total_msgs} сообщений")
 
     def _on_log(self, message, level):
         colors = {"ok": "#6a9e80", "err": "#b06070", "warn": "#a08858", "info": "#5878a8"}
