@@ -27,6 +27,7 @@ _DEFAULTS = {
     "app_proxy": None,
     "app_proxies": [],
     "active_app_proxy_idx": -1,
+    "worker_last_tag": {},
 }
 
 _DICT_KEYS = {"chat_log", "account_proxies", "account_recipients"}
