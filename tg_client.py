@@ -204,9 +204,10 @@ class SenderWorker(QObject):
     failed_detail_signal = pyqtSignal(str, str)
     current_tag_signal  = pyqtSignal(int, str)
     spamblock_signal    = pyqtSignal(int, str, str, list)
+    tag_sent_signal     = pyqtSignal(int, str)
 
     def __init__(self, account, recipients, pastes, interval_min,
-                 pastes_per_recipient, proxy=None, tag_interval_min=0, worker_id=0):
+                 pastes_per_recipient, proxy=None, tag_interval_min=0, worker_id=0, resume_from=None):
         super().__init__()
         self.account             = account
         self.recipients          = recipients
@@ -216,9 +217,11 @@ class SenderWorker(QObject):
         self.proxy               = proxy
         self.tag_interval_min    = tag_interval_min
         self.worker_id           = worker_id
+        self.resume_from         = resume_from
         self._stop  = False
         self._pause = False
         self._done  = 0
+        self._current_tag = None
 
     def stop(self):   self._stop  = True
     def pause(self):  self._pause = True
@@ -268,10 +271,18 @@ class SenderWorker(QObject):
         total = len(self.recipients) * len(self.pastes)
         self._done = 0
         first = True
+        skipping = self.resume_from is not None
 
         for rec in self.recipients:
             tag   = recipient_tag(rec)
             token = recipient_token(rec)
+
+            if skipping:
+                if tag == self.resume_from:
+                    skipping = False
+                else:
+                    self._done += len(self.pastes)
+                    continue
 
             if not first:
                 wait = self.tag_interval_min if self.tag_interval_min > 0 else self.interval_min
@@ -283,8 +294,10 @@ class SenderWorker(QObject):
                     await client.disconnect()
                     return
             first = False
+            self._current_tag = tag
             self.current_tag_signal.emit(self.worker_id, tag)
 
+            tag_ok = True
             for i, paste in enumerate(self.pastes):
                 if self._stop:
                     self._log("Остановлена", "warn")
@@ -362,6 +375,8 @@ class SenderWorker(QObject):
                 self.progress_signal.emit(self._done, total)
                 if i < len(self.pastes) - 1 and self.interval_min > 0:
                     await self._sleep(self.interval_min * 60)
+            else:
+                self.tag_sent_signal.emit(self.worker_id, tag)
 
         await client.disconnect()
 
