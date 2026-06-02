@@ -20,8 +20,13 @@ from theme import (
 )
 
 
+class NoScrollCombo(QComboBox):
+    def wheelEvent(self, e):
+        e.ignore()
+
+
 def styled_combo():
-    cb = QComboBox()
+    cb = NoScrollCombo()
     cb.view().setStyleSheet(COMBO_VIEW_STYLE)
     return cb
 
@@ -128,6 +133,8 @@ class StyledSpinBox(ArrowInput):
 
 
 class StyledTimeEdit(ArrowInput):
+    timeChanged = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._h = self._m = 0
@@ -141,6 +148,7 @@ class StyledTimeEdit(ArrowInput):
 
     def _refresh(self):
         self._edit.setText(f"{self._h:02d}:{self._m:02d}")
+        self.timeChanged.emit()
 
     def _inc(self):
         self._m += 1
