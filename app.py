@@ -19,6 +19,7 @@ from storage import (
     recipient_tag, recipient_token, parse_recipient_line, parse_recipients_bulk
 )
 from tg_client import build_client, SenderWorker, ChatLoader, SpamBotLoader, ProxyChecker, SESSION_DIR
+from device_profiles import random_fingerprint
 from widgets import (
     FadeWidget, SidebarButton, AnimatedButton, AnimatedProgressBar,
     StatCard, StyledSpinBox, StyledTimeEdit, ProxyRowWidget,
@@ -304,6 +305,7 @@ class MainWindow(QMainWindow):
         self._worker_cards  = []
         self._proxy_status  = {}
         self._proxy_rows    = []
+        self._app_proxy_rows = []
         self._ok_count      = 0
         self._err_count     = 0
         self._total_msgs    = 0
@@ -447,16 +449,123 @@ class MainWindow(QMainWindow):
 
     def _build_accounts_page(self):
         w, lay = self._mk_page("Аккаунты")
+
+        content = QHBoxLayout()
+        content.setSpacing(28)
+
+        left = QVBoxLayout()
         self.acc_list = QListWidget()
-        lay.addWidget(self.acc_list)
-        row = QHBoxLayout()
+        self.acc_list.currentRowChanged.connect(self._on_acc_selected)
+        left.addWidget(self.acc_list)
+        btn_row = QHBoxLayout()
         add = AnimatedButton("Добавить аккаунт")
         add.clicked.connect(self._add_account)
         rm = AnimatedButton("Удалить")
         rm.clicked.connect(self._del_account)
-        row.addWidget(add); row.addWidget(rm); row.addStretch()
-        lay.addLayout(row)
+        btn_row.addWidget(add); btn_row.addWidget(rm); btn_row.addStretch()
+        left.addLayout(btn_row)
+        content.addLayout(left, 2)
+
+        right = QVBoxLayout()
+        right.setSpacing(10)
+        fp_lbl = QLabel("ФИНГЕРПРИНТ УСТРОЙСТВА")
+        fp_lbl.setObjectName("section")
+        right.addWidget(fp_lbl)
+
+        self._fp_info = QLabel("Выберите аккаунт")
+        self._fp_info.setStyleSheet("color: #6b82c0; font-size: 12px; background: transparent;")
+        self._fp_info.setWordWrap(True)
+        right.addWidget(self._fp_info)
+
+        right.addSpacing(8)
+        type_lbl = QLabel("ТИП УСТРОЙСТВА")
+        type_lbl.setObjectName("section")
+        right.addWidget(type_lbl)
+        self._fp_type_combo = styled_combo()
+        self._fp_type_combo.addItems(["Случайный", "Android", "iOS", "Desktop (Win/Mac/Linux)"])
+        self._fp_type_combo.setFixedHeight(36)
+        right.addWidget(self._fp_type_combo)
+
+        rand_btn = AnimatedButton("Рандомизировать")
+        rand_btn.clicked.connect(self._randomize_fingerprint)
+        right.addWidget(rand_btn)
+
+        rand_all_btn = AnimatedButton("Рандомизировать все")
+        rand_all_btn.clicked.connect(self._randomize_all_fingerprints)
+        right.addWidget(rand_all_btn)
+
+        check_fp_btn = AnimatedButton("Проверить фингерпринт")
+        check_fp_btn.clicked.connect(self._check_fingerprint)
+        right.addWidget(check_fp_btn)
+
+        self._fp_check_lbl = QLabel("")
+        self._fp_check_lbl.setStyleSheet("color: #6b82c0; font-size: 11px; background: transparent;")
+        self._fp_check_lbl.setWordWrap(True)
+        right.addWidget(self._fp_check_lbl)
+
+        right.addStretch()
+        content.addLayout(right, 1)
+        lay.addLayout(content)
         return w
+
+    def _on_acc_selected(self, row):
+        if row < 0 or row >= len(self.data["accounts"]):
+            self._fp_info.setText("Выберите аккаунт")
+            return
+        acc = self.data["accounts"][row]
+        fp = acc.get("fingerprint")
+        if fp:
+            label = fp.get("_profile_label", "неизвестно")
+            lang = fp.get("lang_code", "?")
+            app_ver = fp.get("app_version", "?")
+            self._fp_info.setText(f"{label}\nПриложение: {app_ver}  Язык: {lang}")
+        else:
+            self._fp_info.setText("Фингерпринт не задан")
+
+    def _get_fp_type(self):
+        idx = self._fp_type_combo.currentIndex()
+        return ["random", "android", "ios", "desktop"][idx]
+
+    def _check_fingerprint(self):
+        row = self.acc_list.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "Ошибка", "Выберите аккаунт"); return
+        acc = self.data["accounts"][row]
+        fp = acc.get("fingerprint")
+        if not fp:
+            self._fp_check_lbl.setText("Фингерпринт не задан. Нажми Рандомизировать.")
+            return
+        self._fp_check_lbl.setText("Проверяем...")
+        def _run():
+            from device_profiles import get_client_kwargs
+            kwargs = get_client_kwargs(acc)
+            lines = [
+                f"Устройство: {kwargs.get('device_model', '?')}",
+                f"ОС: {kwargs.get('system_version', '?')}",
+                f"Приложение: {kwargs.get('app_version', '?')}",
+                f"Язык: {kwargs.get('lang_code', '?')}",
+                f"Тип: {fp.get('_type', '?')}",
+            ]
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(0, lambda: self._fp_check_lbl.setText("\n".join(lines)))
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _randomize_fingerprint(self):
+        row = self.acc_list.currentRow()
+        if row < 0:
+            return
+        fp = random_fingerprint(self._get_fp_type())
+        self.data["accounts"][row]["fingerprint"] = fp
+        save_data(self.data)
+        self._on_acc_selected(row)
+
+    def _randomize_all_fingerprints(self):
+        fp_type = self._get_fp_type()
+        for acc in self.data["accounts"]:
+            acc["fingerprint"] = random_fingerprint(fp_type)
+        save_data(self.data)
+        row = self.acc_list.currentRow()
+        self._on_acc_selected(row)
 
     def _refresh_accounts(self):
         self.acc_list.clear()
@@ -774,13 +883,13 @@ class MainWindow(QMainWindow):
 
         row = QHBoxLayout()
         for label, slot in [
-            ("Использовать",  self._set_active_proxy),
             ("Проверить все", self._check_proxies),
-            ("Удалить",       self._del_proxy),
+            ("Удалить", self._del_proxy),
         ]:
             b = AnimatedButton(label)
             b.clicked.connect(slot)
             row.addWidget(b)
+        row.addStretch()
         left.addLayout(row)
         self.active_proxy_lbl = QLabel("Активный прокси: нет")
         self.active_proxy_lbl.setStyleSheet("color: #4e5a78; font-size: 12px;")
@@ -807,7 +916,7 @@ class MainWindow(QMainWindow):
         self.app_proxy_list.setStyleSheet(PROXY_LIST_STYLE)
         right.addWidget(self.app_proxy_list)
         row = QHBoxLayout()
-        for label, slot in [("Использовать", self._set_active_app_proxy), ("Удалить", self._del_app_proxy)]:
+        for label, slot in [("Использовать", self._set_active_app_proxy), ("Проверить все", self._check_app_proxies), ("Удалить", self._del_app_proxy)]:
             b = AnimatedButton(label)
             b.clicked.connect(slot)
             row.addWidget(b)
@@ -942,6 +1051,22 @@ class MainWindow(QMainWindow):
         if idx < len(self._proxy_rows):
             self._proxy_rows[idx].set_status(status, info)
 
+    def _check_app_proxies(self):
+        proxies = self.data.get("app_proxies", [])
+        if not proxies:
+            QMessageBox.information(self, "Проверка", "Нет прокси для проверки"); return
+        for i, rw in enumerate(self._app_proxy_rows):
+            rw.set_status("checking")
+        chk = ProxyChecker(proxies)
+        chk.result_signal.connect(self._on_app_proxy_result)
+        chk.finished_signal.connect(lambda: None)
+        threading.Thread(target=chk.run, daemon=True).start()
+
+    def _on_app_proxy_result(self, idx, ok, info):
+        status = "ok" if ok else "err"
+        if idx < len(self._app_proxy_rows):
+            self._app_proxy_rows[idx].set_status(status, info)
+
     def _add_app_proxy(self):
         p = self._parse_proxy_form("app_proxy")
         if not p: return
@@ -973,6 +1098,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_app_proxies(self):
         self.app_proxy_list.clear()
+        self._app_proxy_rows = []
         active = self.data.get("active_app_proxy_idx", -1)
         for i, p in enumerate(self.data.get("app_proxies", [])):
             rw = ProxyRowWidget(p, i)
@@ -981,6 +1107,7 @@ class MainWindow(QMainWindow):
             item.setSizeHint(QSize(rw.sizeHint().width(), 42))
             self.app_proxy_list.addItem(item)
             self.app_proxy_list.setItemWidget(item, rw)
+            self._app_proxy_rows.append(rw)
         p = self.data.get("app_proxy")
         if p:
             self.app_proxy_status_lbl.setText(f"Активное: {_proxy_label(p)}")
