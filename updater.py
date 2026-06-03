@@ -4,7 +4,7 @@ import urllib.request
 from pathlib import Path
 from PyQt5.QtWidgets import QMessageBox
 
-APP_VERSION = "4.8"
+APP_VERSION = "4.9"
 GITHUB_BASE_URL    = "https://raw.githubusercontent.com/sh1n7373/something/main/"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/sh1n7373/something/main/version.txt"
 GITHUB_FILES = [
@@ -14,6 +14,7 @@ GITHUB_FILES = [
     "theme.py",
     "updater.py",
     "widgets.py",
+    "device_profiles.py",
 ]
 
 _pending_version = None
