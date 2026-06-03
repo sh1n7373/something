@@ -7,6 +7,7 @@ from pathlib import Path
 from PyQt5.QtCore import QObject, pyqtSignal
 
 from storage import APP_DIR, recipient_tag, recipient_token, apply_token
+from device_profiles import get_client_kwargs, random_fingerprint
 
 SESSION_DIR = APP_DIR / "sessions"
 SESSION_DIR.mkdir(exist_ok=True)
@@ -58,6 +59,7 @@ def build_client(acc, proxy=None, chat_mode=False):
     base = acc["phone"].replace("+", "")
     sess = str(SESSION_DIR / (base + ("_chat" if chat_mode else "")))
     kwargs = {"connection_retries": 5, "retry_delay": 2}
+    kwargs.update(get_client_kwargs(acc))
     if proxy and SOCKS_AVAILABLE:
         ptype = proxy.get("type", "socks5").lower()
         pt = {"socks5": socks.SOCKS5, "socks4": socks.SOCKS4}.get(ptype, socks.HTTP)
@@ -271,7 +273,8 @@ class SenderWorker(QObject):
         total = len(self.recipients) * len(self.pastes)
         self._done = 0
         first = True
-        skipping = self.resume_from is not None
+        tags_in_list = [recipient_tag(r) for r in self.recipients]
+        skipping = self.resume_from is not None and self.resume_from in tags_in_list
 
         for rec in self.recipients:
             tag   = recipient_tag(rec)
@@ -386,13 +389,24 @@ class SenderWorker(QObject):
             sb = build_client(self.account, self.proxy)
             await sb.connect()
             for attempt in range(3):
-                await sb.send_message("@SpamBot", "/start")
                 self._log(f"SpamBot /start попытка {attempt+1}/3", "warn")
+                sent_at = datetime.now()
+                try:
+                    await sb.send_message("@SpamBot", "/start")
+                except Exception as ex:
+                    self._log(f"SpamBot send ошибка: {ex}", "err")
+                    await asyncio.sleep(10)
+                    continue
                 reply_text, btn_labels = "", []
-                for _ in range(5):
+                for _ in range(8):
                     await asyncio.sleep(3)
-                    async for m in sb.iter_messages("@SpamBot", limit=5):
-                        if not m.out and m.message:
+                    async for m in sb.iter_messages("@SpamBot", limit=10):
+                        if m.out:
+                            continue
+                        msg_time = m.date.replace(tzinfo=None)
+                        if msg_time < sent_at:
+                            continue
+                        if m.message:
                             reply_text = m.message
                             if m.reply_markup:
                                 try:
@@ -407,9 +421,11 @@ class SenderWorker(QObject):
                         break
                 if reply_text:
                     last_reply, buttons = reply_text, btn_labels
-                    self._log(f"SpamBot: {reply_text[:100]}", "warn")
+                    self._log(f"SpamBot ответ: {reply_text[:120]}", "warn")
+                    break
                 if attempt < 2:
-                    await asyncio.sleep(15)
+                    self._log(f"SpamBot не ответил, ждём 20 сек...", "warn")
+                    await asyncio.sleep(20)
             await sb.disconnect()
         except Exception as ex:
             self._log(f"SpamBot ошибка: {ex}", "err")
