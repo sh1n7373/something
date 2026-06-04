@@ -18,7 +18,7 @@ from storage import (
     load_data, save_data, APP_DIR,
     recipient_tag, recipient_token, parse_recipient_line, parse_recipients_bulk
 )
-from tg_client import build_client, SenderWorker, ChatLoader, SpamBotLoader, ProxyChecker, SESSION_DIR
+from tg_client import build_client, SenderWorker, ChatLoader, SpamBotLoader, ProxyChecker, FingerprintChecker, SESSION_DIR
 from device_profiles import random_fingerprint
 from widgets import (
     FadeWidget, SidebarButton, AnimatedButton, AnimatedProgressBar,
@@ -531,24 +531,24 @@ class MainWindow(QMainWindow):
         if row < 0:
             QMessageBox.warning(self, "Ошибка", "Выберите аккаунт"); return
         acc = self.data["accounts"][row]
-        fp = acc.get("fingerprint")
-        if not fp:
-            self._fp_check_lbl.setText("Фингерпринт не задан. Нажми Рандомизировать.")
-            return
-        self._fp_check_lbl.setText("Проверяем...")
-        def _run():
-            from device_profiles import get_client_kwargs
-            kwargs = get_client_kwargs(acc)
-            lines = [
-                f"Устройство: {kwargs.get('device_model', '?')}",
-                f"ОС: {kwargs.get('system_version', '?')}",
-                f"Приложение: {kwargs.get('app_version', '?')}",
-                f"Язык: {kwargs.get('lang_code', '?')}",
-                f"Тип: {fp.get('_type', '?')}",
-            ]
-            from PyQt5.QtCore import QTimer
-            QTimer.singleShot(0, lambda: self._fp_check_lbl.setText("\n".join(lines)))
-        threading.Thread(target=_run, daemon=True).start()
+        self._fp_check_lbl.setText("Подключаемся к Telegram...")
+        proxy = self._get_app_proxy()
+        chk = FingerprintChecker(acc, proxy)
+        chk.result_signal.connect(self._on_fp_check_result)
+        chk.error_signal.connect(lambda e: self._fp_check_lbl.setText(f"Ошибка: {e}"))
+        threading.Thread(target=chk.run, daemon=True).start()
+
+    def _on_fp_check_result(self, info):
+        lines = [
+            f"Устройство: {info.get('device', '?')}",
+            f"Платформа: {info.get('platform', '?')}",
+            f"ОС: {info.get('system', '?')}",
+            f"Приложение: {info.get('app', '?')}",
+            f"Страна: {info.get('country', '?')}",
+            f"IP: {info.get('ip', '?')}",
+            f"Официальный: {'да' if info.get('official') else 'нет'}",
+        ]
+        self._fp_check_lbl.setText("\n".join(lines))
 
     def _randomize_fingerprint(self):
         row = self.acc_list.currentRow()
