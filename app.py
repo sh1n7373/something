@@ -4,6 +4,11 @@ import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
 
+if getattr(sys, "frozen", False):
+    _internal = Path(sys.executable).parent / "_internal"
+    if _internal.exists() and str(_internal) not in sys.path:
+        sys.path.insert(0, str(_internal))
+
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QDialog, QVBoxLayout, QHBoxLayout,
     QGridLayout, QLabel, QPushButton, QLineEdit, QTextEdit, QPlainTextEdit,
