@@ -1647,7 +1647,7 @@ class MainWindow(QMainWindow):
         start_dt = now.replace(hour=target.hour(), minute=target.minute(), second=0, microsecond=0)
         if start_dt < now:
             start_dt = start_dt.replace(day=start_dt.day)
-        base_dt = max(now, start_dt)
+        base_dt = max(now, start_dt + 1)
         end_dt = base_dt + timedelta(minutes=mins)
         self.eta_lbl.setText(f"Конец ~{end_dt.strftime('%H:%M')}  {total_msgs} сообщений")
 
