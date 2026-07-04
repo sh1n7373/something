@@ -324,8 +324,13 @@ class SenderWorker(QObject):
 
                 try:
                     text = apply_token(paste, token) if token else paste
-                    await client.send_message(tag, text)
-                    self._log(f"ok  {tag}", "ok")
+                    tag_str = tag if isinstance(tag, str) else recipient_tag(tag)
+                    if not tag_str:
+                        self._log(f"Пустой тег, скип", "warn")
+                        tag_completed = False
+                        break
+                    await client.send_message(tag_str, text)
+                    self._log(f"ok  {tag_str}", "ok")
                 except FloodWaitError as e:
                     self._log(f"Flood {e.seconds}s  {tag}", "warn")
                     await self._sleep(e.seconds)
