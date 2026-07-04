@@ -64,7 +64,7 @@ def build_client(acc, proxy=None, chat_mode=False):
         ptype = proxy.get("type", "socks5").lower()
         if ptype == "mtproto":
             from telethon.network.connection.tcpmtproxy import ConnectionTcpMTProxyRandomizedIntermediate
-            secret = proxy.get("password", "") or proxy.get("user", "")
+            secret = proxy.get("secret", "") or proxy.get("password", "")
             kwargs["connection"] = ConnectionTcpMTProxyRandomizedIntermediate
             kwargs["proxy"] = (proxy["host"], int(proxy["port"]), secret)
         elif SOCKS_AVAILABLE:
