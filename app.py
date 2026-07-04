@@ -946,19 +946,49 @@ class MainWindow(QMainWindow):
         for lbl_text, attr, ph in [
             ("ХОСТ",                  f"{prefix}_host", "127.0.0.1"),
             ("ПОРТ",                  f"{prefix}_port", "1080"),
-            ("ЛОГИН (необязательно)", f"{prefix}_user", "username"),
         ]:
             lay.addWidget(section_label(lbl_text))
             e = QLineEdit()
             e.setPlaceholderText(ph)
             setattr(self, attr, e)
             lay.addWidget(e)
-        lay.addWidget(section_label("ПАРОЛЬ (необязательно)"))
-        pw = QLineEdit()
-        pw.setPlaceholderText("пароль")
-        pw.setEchoMode(QLineEdit.Password)
-        setattr(self, f"{prefix}_pass", pw)
-        lay.addWidget(pw)
+
+        lbl_user = section_label("ЛОГИН (необязательно)")
+        user_edit = QLineEdit()
+        user_edit.setPlaceholderText("username")
+        setattr(self, f"{prefix}_user", user_edit)
+
+        lbl_pass = section_label("ПАРОЛЬ (необязательно)")
+        pass_edit = QLineEdit()
+        pass_edit.setPlaceholderText("пароль")
+        pass_edit.setEchoMode(QLineEdit.Password)
+        setattr(self, f"{prefix}_pass", pass_edit)
+
+        lbl_secret = section_label("SECRET KEY")
+        secret_edit = QLineEdit()
+        secret_edit.setPlaceholderText("dd...(hex)")
+        setattr(self, f"{prefix}_secret", secret_edit)
+
+        lay.addWidget(lbl_user)
+        lay.addWidget(user_edit)
+        lay.addWidget(lbl_pass)
+        lay.addWidget(pass_edit)
+        lay.addWidget(lbl_secret)
+        lay.addWidget(secret_edit)
+        lbl_secret.hide()
+        secret_edit.hide()
+
+        def _on_type_change(idx, lu=lbl_user, ue=user_edit, lp=lbl_pass, pe=pass_edit, ls=lbl_secret, se=secret_edit):
+            is_mt = cb.currentText() == "mtproto"
+            lu.setVisible(not is_mt)
+            ue.setVisible(not is_mt)
+            lp.setVisible(not is_mt)
+            pe.setVisible(not is_mt)
+            ls.setVisible(is_mt)
+            se.setVisible(is_mt)
+
+        cb.currentIndexChanged.connect(_on_type_change)
+
         btn = AnimatedButton("+ Добавить")
         slot = self._add_proxy if prefix == "proxy" else self._add_app_proxy
         btn.clicked.connect(slot)
@@ -975,17 +1005,24 @@ class MainWindow(QMainWindow):
             port = int(port)
         except ValueError:
             QMessageBox.warning(self, "Ошибка", "Порт должен быть числом"); return None
+        ptype = getattr(self, f"{prefix}_type").currentText()
+        secret_w = getattr(self, f"{prefix}_secret", None)
+        secret = secret_w.text().strip() if secret_w else ""
         return {
-            "type":     getattr(self, f"{prefix}_type").currentText(),
+            "type":     ptype,
             "host":     host,
             "port":     port,
             "user":     getattr(self, f"{prefix}_user").text().strip(),
             "password": getattr(self, f"{prefix}_pass").text().strip(),
+            "secret":   secret,
         }
 
     def _clear_proxy_form(self, prefix):
         for attr in (f"{prefix}_host", f"{prefix}_port", f"{prefix}_user", f"{prefix}_pass"):
             getattr(self, attr).clear()
+        secret_w = getattr(self, f"{prefix}_secret", None)
+        if secret_w:
+            secret_w.clear()
 
     def _add_proxy(self):
         p = self._parse_proxy_form("proxy")
@@ -1511,13 +1548,12 @@ class MainWindow(QMainWindow):
         if any(w for w in self._workers.values()):
             for idx in list(self._workers.keys()):
                 self._stop_worker(idx)
+            self._run_btn.setText("Начать отписи")
         else:
             for idx in range(len(self._worker_cards)):
                 self._start_worker(idx)
-            if any(w for w in self._workers.values()) or any(self._worker_timers.values()):
+            if any(w for w in self._workers.values()):
                 self._run_btn.setText("Остановить все")
-                self.progress_bar.show()
-                self._pause_btn.show()
 
     def _toggle_pause(self):
         if self._paused:
