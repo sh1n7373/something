@@ -60,13 +60,19 @@ def build_client(acc, proxy=None, chat_mode=False):
     sess = str(SESSION_DIR / (base + ("_chat" if chat_mode else "")))
     kwargs = {"connection_retries": 5, "retry_delay": 2}
     kwargs.update(get_client_kwargs(acc))
-    if proxy and SOCKS_AVAILABLE:
+    if proxy:
         ptype = proxy.get("type", "socks5").lower()
-        pt = {"socks5": socks.SOCKS5, "socks4": socks.SOCKS4}.get(ptype, socks.HTTP)
-        kwargs["proxy"] = (
-            pt, proxy["host"], int(proxy["port"]), True,
-            proxy.get("user") or None, proxy.get("password") or None,
-        )
+        if ptype == "mtproto":
+            from telethon.network.connection.tcpmtproxy import ConnectionTcpMTProxyRandomizedIntermediate
+            secret = proxy.get("password", "") or proxy.get("user", "")
+            kwargs["connection"] = ConnectionTcpMTProxyRandomizedIntermediate
+            kwargs["proxy"] = (proxy["host"], int(proxy["port"]), secret)
+        elif SOCKS_AVAILABLE:
+            pt = {"socks5": socks.SOCKS5, "socks4": socks.SOCKS4}.get(ptype, socks.HTTP)
+            kwargs["proxy"] = (
+                pt, proxy["host"], int(proxy["port"]), True,
+                proxy.get("user") or None, proxy.get("password") or None,
+            )
     return TelegramClient(sess, acc["api_id"], acc["api_hash"], **kwargs)
 
 
@@ -253,14 +259,18 @@ class SenderWorker(QObject):
         _session_wal(acc["phone"])
         client = build_client(acc, self.proxy)
 
-        for attempt in range(3):
+        for attempt in range(5):
             try:
                 await client.connect()
                 break
             except Exception as ex:
-                if "database is locked" in str(ex).lower() and attempt < 2:
+                err = str(ex).lower()
+                if "database is locked" in err and attempt < 4:
                     self._log("База заблокирована, повтор...", "warn")
                     await asyncio.sleep(3)
+                elif attempt < 4:
+                    self._log(f"Ошибка подключения ({attempt+1}/5), повтор через 10 сек...", "warn")
+                    await asyncio.sleep(10)
                 else:
                     self._log(f"Ошибка подключения: {ex}", "err")
                     return
@@ -432,6 +442,42 @@ class SenderWorker(QObject):
         except Exception as ex:
             self._log(f"SpamBot ошибка: {ex}", "err")
         return last_reply, buttons
+
+
+class ChatLoader(QObject):
+    messages_loaded = pyqtSignal(str, list)
+    error_signal    = pyqtSignal(str)
+
+    def __init__(self, account, recipient, proxy=None):
+        super().__init__()
+        self.account   = account
+        self.recipient = recipient
+        self.proxy     = proxy
+
+    def run(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(self._load())
+
+    async def _load(self):
+        try:
+            client = build_client(self.account, self.proxy)
+            await client.connect()
+            if not await client.is_user_authorized():
+                self.error_signal.emit("Аккаунт не авторизован")
+                await client.disconnect()
+                return
+            msgs = []
+            async for msg in client.iter_messages(self.recipient, limit=50):
+                if msg.message:
+                    sender = "Я" if msg.out else self.recipient
+                    ts = msg.date.strftime("%d.%m %H:%M")
+                    msgs.append({"sender": sender, "text": msg.message, "ts": ts, "out": msg.out})
+            msgs.reverse()
+            await client.disconnect()
+            self.messages_loaded.emit(self.recipient, msgs)
+        except Exception as ex:
+            self.error_signal.emit(str(ex))
 
 
 class SpamBotLoader(QObject):
