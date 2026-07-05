@@ -350,7 +350,7 @@ class MainWindow(QMainWindow):
         for name, idx in [
             ("Аккаунты", 0), ("Теги", 1), ("Пасты", 2), ("Отписи", 3),
             ("Логи", 4), ("Прокси пул", 5), ("Системное прокси", 6),
-            ("Чаты", 7), ("Спамблок", 8),
+            ("Чаты", 7), ("Спамблок", 8), ("Dex Bubble", 9),
         ]:
             btn = SidebarButton(name)
             btn.clicked.connect(lambda _checked, i=idx: self._switch_tab(i))
@@ -417,6 +417,7 @@ class MainWindow(QMainWindow):
             self._build_sys_proxy_page(),
             self._build_chats_page(),
             self._build_spamblock_page(),
+            self._build_dex_bubble_page(),
         ]
         for p in pages:
             self._stack.addWidget(p)
@@ -1543,6 +1544,17 @@ class MainWindow(QMainWindow):
             if idx < len(self._worker_cards):
                 self._worker_cards[idx]["pause_btn"].setText("Продолжить")
             self._on_log(f"[W{idx+1}] На паузе", "warn")
+        all_paused = all(self._worker_paused.get(i, False) for i in self._workers if self._workers.get(i))
+        any_paused = any(self._worker_paused.get(i, False) for i in self._workers if self._workers.get(i))
+        if all_paused:
+            self._paused = True
+            self._pause_btn.setText("Продолжить")
+        elif not any_paused:
+            self._paused = False
+            self._pause_btn.setText("Пауза")
+        else:
+            self._paused = False
+            self._pause_btn.setText("Пауза")
 
     def _toggle_send(self):
         if any(w for w in self._workers.values()):
@@ -1561,12 +1573,20 @@ class MainWindow(QMainWindow):
                 if w: w.resume()
             self._paused = False
             self._pause_btn.setText("Пауза")
+            for i, cd in enumerate(self._worker_cards):
+                if self._workers.get(i):
+                    cd["pause_btn"].setText("Пауза")
+                    self._worker_paused[i] = False
             self._on_log("Возобновлена", "info")
         else:
             for w in self._workers.values():
                 if w: w.pause()
             self._paused = True
             self._pause_btn.setText("Продолжить")
+            for i, cd in enumerate(self._worker_cards):
+                if self._workers.get(i):
+                    cd["pause_btn"].setText("Продолжить")
+                    self._worker_paused[i] = True
             self._on_log("На паузе", "warn")
 
     def _on_worker_tag(self, wid, tag):
@@ -2052,6 +2072,150 @@ class MainWindow(QMainWindow):
 
     def _apply_spam_reply(self, acc, reply, btns):
         self._on_spambot_result(reply, btns)
+
+    def _build_dex_bubble_page(self):
+        w, lay = self._mk_page("Dex Bubble", "Данные токена с DEX Screener")
+
+        top = QHBoxLayout()
+        top.setSpacing(10)
+        chain_lbl = section_label("ЧЕЙ Н")
+        top.addWidget(chain_lbl)
+        self._dex_chain = styled_combo()
+        self._dex_chain.addItems(["solana", "bsc"])
+        self._dex_chain.setFixedHeight(36)
+        self._dex_chain.setFixedWidth(120)
+        top.addWidget(self._dex_chain)
+        addr_lbl = section_label("АДРЕС КОНТРАКТА")
+        top.addWidget(addr_lbl)
+        self._dex_addr = QLineEdit()
+        self._dex_addr.setPlaceholderText("0x... или адрес Solana")
+        top.addWidget(self._dex_addr)
+        fetch_btn = AnimatedButton("Найти")
+        fetch_btn.setFixedWidth(100)
+        fetch_btn.clicked.connect(self._fetch_dex_data)
+        top.addWidget(fetch_btn)
+        lay.addLayout(top)
+
+        self._dex_card = QFrame()
+        self._dex_card.setObjectName("card")
+        self._dex_card.hide()
+        card_lay = QVBoxLayout(self._dex_card)
+        card_lay.setContentsMargins(24, 20, 24, 20)
+        card_lay.setSpacing(12)
+
+        name_row = QHBoxLayout()
+        self._dex_name = QLabel("")
+        self._dex_name.setStyleSheet("font-size: 22px; font-weight: 700; color: #e8eef8; background: transparent;")
+        name_row.addWidget(self._dex_name)
+        self._dex_chain_lbl = QLabel("")
+        self._dex_chain_lbl.setStyleSheet("font-size: 12px; color: #4e5a78; background: transparent;")
+        name_row.addWidget(self._dex_chain_lbl)
+        name_row.addStretch()
+        card_lay.addLayout(name_row)
+
+        sep = QFrame(); sep.setObjectName("separator")
+        card_lay.addWidget(sep)
+
+        grid = QGridLayout()
+        grid.setSpacing(16)
+        self._dex_fields = {}
+        fields = [
+            ("ЦЕНА USD", "price"), ("ИЗМЕНЕНИЕ 24ч", "change24h"),
+            ("ОБЪЁМ 24ч", "volume24h"), ("ЛИКВИДНОСТЬ", "liquidity"),
+            ("КАПИТАЛИЗАЦИЯ", "marketcap"), ("СДЕЛОК 24ч", "txns"),
+            ("ПОКУПОК 24ч", "buys"), ("ПРОДАЖ 24ч", "sells"),
+        ]
+        for i, (label, key) in enumerate(fields):
+            col = QVBoxLayout()
+            lh = QLabel(label)
+            lh.setObjectName("section")
+            col.addWidget(lh)
+            val = QLabel("...")
+            val.setStyleSheet("font-size: 18px; font-weight: 700; color: #6b9ed4; background: transparent;")
+            col.addWidget(val)
+            self._dex_fields[key] = val
+            grid.addLayout(col, i // 4, i % 4)
+        card_lay.addLayout(grid)
+
+        sep2 = QFrame(); sep2.setObjectName("separator")
+        card_lay.addWidget(sep2)
+
+        self._dex_addr_lbl = QLabel("")
+        self._dex_addr_lbl.setStyleSheet("color: #3a4a68; font-size: 11px; background: transparent;")
+        self._dex_addr_lbl.setWordWrap(True)
+        card_lay.addWidget(self._dex_addr_lbl)
+
+        lay.addWidget(self._dex_card)
+        self._dex_status = QLabel("")
+        self._dex_status.setStyleSheet("color: #4e5a78; font-size: 12px;")
+        lay.addWidget(self._dex_status)
+        lay.addStretch()
+        return w
+
+    def _fetch_dex_data(self):
+        addr = self._dex_addr.text().strip()
+        chain = self._dex_chain.currentText()
+        if not addr:
+            self._dex_status.setText("Введите адрес контракта")
+            return
+        self._dex_status.setText("Загружаем...")
+        self._dex_card.hide()
+
+        def _run():
+            import urllib.request, json
+            try:
+                url = f"https://api.dexscreener.com/latest/dex/tokens/{addr}"
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    data = json.loads(r.read())
+                pairs = data.get("pairs") or []
+                pairs = [p for p in pairs if p.get("chainId", "").lower() == chain.lower()]
+                if not pairs:
+                    QTimer.singleShot(0, lambda: self._dex_status.setText("Токен не найден на выбранном чейне"))
+                    return
+                p = sorted(pairs, key=lambda x: float(x.get("liquidity", {}).get("usd", 0) or 0), reverse=True)[0]
+
+                def fmt_num(v):
+                    if v is None: return "?"
+                    v = float(v)
+                    if v >= 1_000_000_000: return f"${v/1_000_000_000:.2f}B"
+                    if v >= 1_000_000: return f"${v/1_000_000:.2f}M"
+                    if v >= 1_000: return f"${v/1_000:.2f}K"
+                    return f"${v:.6f}" if v < 0.01 else f"${v:.4f}"
+
+                info = {
+                    "name": f"{p.get('baseToken', {}).get('name', '?')} ({p.get('baseToken', {}).get('symbol', '?')})",
+                    "chain": f"{p.get('chainId', '').upper()} | {p.get('dexId', '').upper()}",
+                    "price": fmt_num(p.get("priceUsd")),
+                    "change24h": f"{p.get('priceChange', {}).get('h24', '?')}%",
+                    "volume24h": fmt_num((p.get("volume") or {}).get("h24")),
+                    "liquidity": fmt_num((p.get("liquidity") or {}).get("usd")),
+                    "marketcap": fmt_num(p.get("marketCap") or p.get("fdv")),
+                    "txns": str((p.get("txns") or {}).get("h24", {}).get("buys", 0) + (p.get("txns") or {}).get("h24", {}).get("sells", 0)),
+                    "buys": str((p.get("txns") or {}).get("h24", {}).get("buys", "?")),
+                    "sells": str((p.get("txns") or {}).get("h24", {}).get("sells", "?")),
+                    "addr": p.get("pairAddress", addr),
+                }
+                QTimer.singleShot(0, lambda: self._show_dex_card(info))
+            except Exception as ex:
+                QTimer.singleShot(0, lambda e=ex: self._dex_status.setText(f"Ошибка: {e}"))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _show_dex_card(self, info):
+        self._dex_name.setText(info["name"])
+        self._dex_chain_lbl.setText(info["chain"])
+        for key, val in self._dex_fields.items():
+            val.setText(info.get(key, "?"))
+        ch = info.get("change24h", "")
+        try:
+            color = "#6a9e80" if float(ch.replace("%", "")) >= 0 else "#b06070"
+        except Exception:
+            color = "#6b9ed4"
+        self._dex_fields["change24h"].setStyleSheet(f"font-size: 18px; font-weight: 700; color: {color}; background: transparent;")
+        self._dex_addr_lbl.setText(f"Pair: {info['addr']}")
+        self._dex_status.setText("")
+        self._dex_card.show()
 
     def _paused(self):
         return getattr(self, "__paused", False)
