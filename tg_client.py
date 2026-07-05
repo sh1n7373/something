@@ -311,6 +311,7 @@ class SenderWorker(QObject):
             self.current_tag_signal.emit(self.worker_id, tag)
 
             tag_completed = True
+            pastes_sent = 0
             for i, paste in enumerate(self.pastes):
                 if self._stop:
                     self._log("Остановлена", "warn")
@@ -331,6 +332,7 @@ class SenderWorker(QObject):
                         break
                     await client.send_message(tag_str, text)
                     self._log(f"ok  {tag_str}", "ok")
+                    pastes_sent += 1
                 except FloodWaitError as e:
                     self._log(f"Flood {e.seconds}s  {tag}", "warn")
                     await self._sleep(e.seconds)
@@ -347,6 +349,7 @@ class SenderWorker(QObject):
                     reply, buttons = await self._query_spambot()
                     self.spamblock_signal.emit(self.worker_id, tag, reply, buttons)
                     await client.connect()
+                    tag_completed = False
                     self._done += 1
                     self.progress_signal.emit(self._done, total)
                     break
@@ -399,7 +402,7 @@ class SenderWorker(QObject):
                 if i < len(self.pastes) - 1 and self.interval_min > 0:
                     await self._sleep(self.interval_min * 60)
 
-            if tag_completed:
+            if tag_completed and pastes_sent == len(self.pastes):
                 self.tag_sent_signal.emit(self.worker_id, tag)
 
         await client.disconnect()
