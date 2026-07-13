@@ -9,8 +9,6 @@ if getattr(sys, "frozen", False):
     _internal = Path(sys.executable).parent / "_internal"
     if _internal.exists() and str(_internal) not in sys.path:
         sys.path.insert(0, str(_internal))
-    os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--no-sandbox")
-    os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QDialog, QVBoxLayout, QHBoxLayout,
@@ -26,7 +24,7 @@ from storage import (
     load_data, save_data, APP_DIR,
     recipient_tag, recipient_token, parse_recipient_line, parse_recipients_bulk
 )
-from tg_client import build_client, SenderWorker, ChatLoader, SpamBotLoader, ProxyChecker, FingerprintChecker, SESSION_DIR
+from tg_client import build_client, SenderWorker, ChatLoader, ChatLoaderRetry, SpamBotLoader, ProxyChecker, FingerprintChecker, SESSION_DIR
 from device_profiles import random_fingerprint
 from widgets import (
     FadeWidget, SidebarButton, AnimatedButton, AnimatedProgressBar,
@@ -254,49 +252,6 @@ def _proxy_label(p):
     return f"{p['type'].upper()}  {p['host']}:{p['port']}"
 
 
-class SpamWorker(QObject):
-    result_signal = pyqtSignal(str, list)
-    error_signal  = pyqtSignal(str)
-
-    def __init__(self, acc, text, proxy):
-        super().__init__()
-        self.acc   = acc
-        self.text  = text
-        self.proxy = proxy
-
-    def run(self):
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(self._inner())
-
-    async def _inner(self):
-        try:
-            from tg_client import build_client
-            client = build_client(self.acc, self.proxy, chat_mode=True)
-            await client.connect()
-            if not await client.is_user_authorized():
-                self.error_signal.emit("Аккаунт не авторизован")
-                await client.disconnect()
-                return
-            await client.send_message("@SpamBot", self.text)
-            reply, btns = "", []
-            for _ in range(10):
-                await asyncio.sleep(2)
-                async for m in client.iter_messages("@SpamBot", limit=5):
-                    if not m.out and m.message:
-                        reply = m.message
-                        if m.reply_markup and hasattr(m.reply_markup, "rows"):
-                            for row in m.reply_markup.rows:
-                                for b in row.buttons:
-                                    if hasattr(b, "text"):
-                                        btns.append(b.text)
-                        break
-                if reply:
-                    break
-            await client.disconnect()
-            self.result_signal.emit(reply, btns)
-        except Exception as ex:
-            self.error_signal.emit(str(ex))
-
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -321,6 +276,7 @@ class MainWindow(QMainWindow):
         self._done_msgs     = 0
         self._failed_tags   = []
         self._failed_entries = []
+        self._paused        = False
         self._spamblock_log = []
 
         self._build_ui()
@@ -1310,7 +1266,8 @@ class MainWindow(QMainWindow):
         if idx > 0:
             rm = AnimatedButton("Удалить")
             rm.setFixedHeight(28); rm.setFixedWidth(90)
-            rm.clicked.connect(lambda _c, i=idx: self._remove_worker_card(i))
+            rm.clicked.connect(lambda _c, w=card: self._remove_worker_card(
+                next((j for j, cd in enumerate(self._worker_cards) if cd["card"] is w), -1)))
             title_row.addWidget(rm)
         cl.addLayout(title_row)
 
@@ -1652,8 +1609,14 @@ class MainWindow(QMainWindow):
             out.write_text("\n".join(self._failed_tags), encoding="utf-8")
             self._on_log(f"Неудачных: {len(self._failed_tags)}, сохранено в {out}", "warn")
         self._on_log("Все потоки завершены", "ok")
-        self._total_msgs = 0
-        self._done_msgs  = 0
+        self._total_msgs   = 0
+        self._done_msgs    = 0
+        self._ok_count     = 0
+        self._err_count    = 0
+        self._failed_tags  = []
+        self._failed_entries = []
+        self.stat_ok.set_value(0)
+        self.stat_err.set_value(0)
 
     def _refresh_sender_page(self):
         if not self._worker_cards:
@@ -1817,7 +1780,7 @@ class MainWindow(QMainWindow):
             self._chat_timer.timeout.connect(self._tick_chat)
         self._chat_timer.start(80)
         self.chat_view.setPlainText("⠋  Загружаем переписку...")
-        loader = ChatLoader(self.data["accounts"][acc_idx], tag, proxy=self._get_app_proxy())
+        loader = ChatLoaderRetry(self.data["accounts"][acc_idx], tag, proxy=self._get_app_proxy())
         loader.messages_loaded.connect(self._on_chat_loaded)
         loader.error_signal.connect(self._on_chat_error)
         threading.Thread(target=loader.run, daemon=True).start()
@@ -2064,7 +2027,8 @@ class MainWindow(QMainWindow):
                 b.setMinimumHeight(44)
                 b.clicked.connect(lambda _, t=btn_text: self._do_spam_send(
                     self.data["accounts"][self._spam_acc_combo.currentIndex()], t
-                ))
+                ) if self._spam_acc_combo.currentIndex() >= 0 and
+                self._spam_acc_combo.currentIndex() < len(self.data["accounts"]) else None)
                 self._spam_btns_lay.addWidget(b)
         else:
             no = QLabel("Нет кнопок от Spam info bot")
@@ -2077,11 +2041,7 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "_spam_reply"): return
         self._spam_reply.setPlainText(f"Ошибка: {err}")
 
-    def _apply_spam_reply(self, acc, reply, btns):
-        self._on_spambot_result(reply, btns)
 
-    def _paused(self):
-        return getattr(self, "__paused", False)
 
 
 if __name__ == "__main__":
