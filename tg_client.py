@@ -142,7 +142,12 @@ class ProxyChecker(QObject):
         self._stop = True
 
     def run(self):
-        asyncio.new_event_loop().run_until_complete(self._run())
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._run())
+        finally:
+            loop.close()
         self.finished_signal.emit()
 
     async def _run(self):
@@ -293,9 +298,8 @@ class SenderWorker(QObject):
             if skipping:
                 if tag == self.resume_from:
                     skipping = False
-                else:
-                    self._done += len(self.pastes)
-                    continue
+                self._done += len(self.pastes)
+                continue
 
             if not first:
                 wait = self.tag_interval_min if self.tag_interval_min > 0 else self.interval_min
@@ -348,11 +352,7 @@ class SenderWorker(QObject):
                     await client.disconnect()
                     reply, buttons = await self._query_spambot()
                     self.spamblock_signal.emit(self.worker_id, tag, reply, buttons)
-                    await client.connect()
-                    tag_completed = False
-                    self._done += 1
-                    self.progress_signal.emit(self._done, total)
-                    break
+                    return
                 except Exception as ex:
                     err_str = str(ex).lower()
                     if "database is locked" in err_str:
@@ -360,19 +360,19 @@ class SenderWorker(QObject):
                         await asyncio.sleep(5)
                     elif "disconnected" in err_str or "not connected" in err_str:
                         self._log(f"Соединение потеряно на {tag}, переподключаем...", "warn")
-                        attempt = 0
+                        reconnect_try = 0
                         while True:
                             if self._stop:
                                 await client.disconnect()
                                 return
                             await asyncio.sleep(4)
-                            attempt += 1
+                            reconnect_try += 1
                             try:
                                 await client.connect()
                                 self._log(f"Соединение восстановлено, продолжаем с {tag}", "ok")
                                 break
                             except Exception:
-                                self._log(f"Переподключение {attempt}...", "warn")
+                                self._log(f"Переподключение {reconnect_try}...", "warn")
                     elif any(e in err_str for e in _SKIP_ERRORS):
                         if "allow_payment_required" in err_str:
                             self._log(f"Скип {tag}: требуется оплата", "warn")
@@ -582,6 +582,7 @@ class FingerprintChecker(QObject):
 
 
 
+class ChatLoaderRetry(QObject):
     messages_loaded = pyqtSignal(str, list)
     error_signal    = pyqtSignal(str)
 
