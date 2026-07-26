@@ -39,6 +39,76 @@ def resource_path(name):
     return str(Path(base) / name)
 
 
+LICENSE_SERVER = "http://твой_ip:8000"
+LICENSE_FILE   = APP_DIR / "license.key"
+
+
+def _check_license(key: str) -> tuple[bool, str]:
+    try:
+        import urllib.request, json
+        data = json.dumps({"key": key}).encode()
+        req  = urllib.request.Request(
+            f"{LICENSE_SERVER}/verify",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            result = json.loads(resp.read())
+        return result.get("valid", False), result.get("message", "")
+    except Exception as ex:
+        return False, f"Нет связи с сервером: {ex}"
+
+
+class LicenseDialog(QDialog):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Lagos Sender — Активация")
+        self.setFixedWidth(420)
+        self.setStyleSheet(STYLE)
+        self._valid_key = ""
+
+        lay = QVBoxLayout(self)
+        lay.setSpacing(16)
+        lay.setContentsMargins(32, 32, 32, 32)
+
+        title = QLabel("Введите лицензионный ключ")
+        title.setStyleSheet("font-size:16px; font-weight:700; color:#c8d3f0;")
+        lay.addWidget(title)
+
+        self._inp = QLineEdit()
+        self._inp.setPlaceholderText("LAGOS-XXXX-XXXX-XXXX-XXXX")
+        self._inp.setFixedHeight(42)
+        self._inp.textChanged.connect(lambda t: self._inp.setText(t.upper()))
+        lay.addWidget(self._inp)
+
+        self._status = QLabel("")
+        self._status.setStyleSheet("font-size:12px; color:#e06c75;")
+        lay.addWidget(self._status)
+
+        btn = AnimatedButton("Активировать")
+        btn.setFixedHeight(42)
+        btn.clicked.connect(self._activate)
+        lay.addWidget(btn)
+
+    def _activate(self):
+        key = self._inp.text().strip()
+        if not key:
+            self._status.setText("Введите ключ")
+            return
+        self._status.setStyleSheet("font-size:12px; color:#4e5a78;")
+        self._status.setText("Проверяем...")
+        QApplication.processEvents()
+        ok, msg = _check_license(key)
+        if ok:
+            LICENSE_FILE.write_text(key, encoding="utf-8")
+            self._valid_key = key
+            self.accept()
+        else:
+            self._status.setStyleSheet("font-size:12px; color:#e06c75;")
+            self._status.setText(msg or "Недействительный ключ")
+
+
 class AuthDialog(QDialog):
     _sig_status  = pyqtSignal(str)
     _sig_code    = pyqtSignal()
@@ -275,8 +345,9 @@ class MainWindow(QMainWindow):
         self._total_msgs    = 0
         self._done_msgs     = 0
         self._failed_tags   = []
-        self._failed_entries = []
-        self._paused        = False
+        self._failed_entries  = []
+        self._failed_tags_set = set()
+        self._paused          = False
         self._spamblock_log = []
 
         self._build_ui()
@@ -1341,6 +1412,12 @@ class MainWindow(QMainWindow):
         pause_btn.clicked.connect(lambda _c, i=idx: self._toggle_worker_pause(i))
         btn_row.addWidget(pause_btn)
 
+        reset_btn = AnimatedButton("С начала")
+        reset_btn.setMinimumHeight(36)
+        reset_btn.setFixedWidth(100)
+        reset_btn.clicked.connect(lambda _c, i=idx: self._reset_worker_progress(i))
+        btn_row.addWidget(reset_btn)
+
         cur_tag_lbl = QLabel("")
         cur_tag_lbl.setStyleSheet("color: #6b82c0; font-size: 12px; background: transparent;")
         btn_row.addWidget(cur_tag_lbl)
@@ -1351,7 +1428,7 @@ class MainWindow(QMainWindow):
         self._worker_cards.append({
             "card": card, "acc_combo": acc_combo, "proxy_combo": proxy_combo,
             "paste_list": paste_lw, "rec_combo": rec_combo,
-            "start_btn": start_btn, "pause_btn": pause_btn,
+            "start_btn": start_btn, "pause_btn": pause_btn, "reset_btn": reset_btn,
             "cur_tag_lbl": cur_tag_lbl,
         })
 
@@ -1376,6 +1453,11 @@ class MainWindow(QMainWindow):
         cd["card"].setParent(None)
         cd["card"].deleteLater()
         self._worker_cards.pop(idx)
+
+    def _reset_worker_progress(self, idx):
+        self.data.setdefault("worker_last_tag", {}).pop(str(idx), None)
+        save_data(self.data)
+        self._on_log(f"[W{idx+1}] Прогресс сброшен, запуск с начала", "info")
 
     def _get_worker_pastes(self, idx):
         if idx >= len(self._worker_cards): return []
@@ -1413,7 +1495,7 @@ class MainWindow(QMainWindow):
 
         worker = SenderWorker(
             acc, recs, pastes,
-            self.interval_spin.value(), len(pastes),
+            self.interval_spin.value(),
             proxy=proxy,
             tag_interval_min=self.tag_interval_spin.value(),
             worker_id=idx,
@@ -1427,6 +1509,7 @@ class MainWindow(QMainWindow):
         worker.current_tag_signal.connect(self._on_worker_tag)
         worker.spamblock_signal.connect(self._on_spamblock)
         worker.tag_sent_signal.connect(self._on_tag_sent)
+        worker.session_kicked_signal.connect(self._on_session_kicked)
 
         self._workers[idx] = worker
         self._worker_totals[idx] = len(recs) * len(pastes)
@@ -1575,6 +1658,22 @@ class MainWindow(QMainWindow):
         self.data["worker_last_tag"].pop(str(wid), None)
         save_data(self.data)
 
+    def _on_session_kicked(self, worker_id, phone):
+        self._on_log(f"[W{worker_id+1}] СЕССИЯ КИКНУТА — {phone}", "err")
+        for idx, w in list(self._workers.items()):
+            if w and idx < len(self._worker_cards):
+                acc_idx = self._worker_cards[idx]["acc_combo"].currentIndex()
+                if 0 <= acc_idx < len(self.data["accounts"]):
+                    if self.data["accounts"][acc_idx].get("phone") == phone:
+                        self._stop_worker(idx)
+        QMessageBox.critical(
+            self,
+            "Сессия кикнута",
+            f"Аккаунт {phone} был кикнут Telegram.\n\n"
+            "Все потоки этого аккаунта остановлены.\n"
+            "Войдите заново через вкладку Аккаунты.",
+        )
+
     def _on_worker_progress(self, wid, done_delta, total_delta):
         self._done_msgs = sum(getattr(w, "_done", 0) for w in self._workers.values() if w)
         total = sum(self._worker_totals.values()) or self._total_msgs
@@ -1613,8 +1712,9 @@ class MainWindow(QMainWindow):
         self._done_msgs    = 0
         self._ok_count     = 0
         self._err_count    = 0
-        self._failed_tags  = []
-        self._failed_entries = []
+        self._failed_tags     = []
+        self._failed_entries  = []
+        self._failed_tags_set = set()
         self.stat_ok.set_value(0)
         self.stat_err.set_value(0)
 
@@ -1698,7 +1798,8 @@ class MainWindow(QMainWindow):
             self._failed_tags.append(tag)
 
     def _on_failed_detail(self, tag, reason):
-        if tag not in [e[0] for e in self._failed_entries]:
+        if tag not in self._failed_tags_set:
+            self._failed_tags_set.add(tag)
             self._failed_entries.append((tag, reason))
         self._refresh_logs()
 
@@ -1712,17 +1813,47 @@ class MainWindow(QMainWindow):
         self.chat_acc_combo.setMinimumWidth(260)
         self.chat_acc_combo.setFixedHeight(38)
         top.addWidget(self.chat_acc_combo)
-        load = AnimatedButton("Загрузить список")
-        load.clicked.connect(self._load_chat_contacts)
-        top.addWidget(load)
+        load_btn = AnimatedButton("Загрузить")
+        load_btn.clicked.connect(self._load_chats_current_mode)
+        top.addWidget(load_btn)
         top.addStretch()
         lay.addLayout(top)
+
+        mode_bar = QHBoxLayout()
+        self._chat_mode_btns = {}
+        for key, label in [("list", "Из списка"), ("all", "Все чаты")]:
+            btn = AnimatedButton(label)
+            btn.setCheckable(True)
+            btn.clicked.connect(lambda _, k=key: self._switch_chat_mode(k))
+            self._chat_mode_btns[key] = btn
+            mode_bar.addWidget(btn)
+        mode_bar.addStretch()
+        lay.addLayout(mode_bar)
+
+        self._chat_db_row = QWidget()
+        db_lay = QHBoxLayout(self._chat_db_row)
+        db_lay.setContentsMargins(0, 0, 0, 0)
+        db_lay.setSpacing(12)
+        db_lay.addWidget(section_label("БАЗА"))
+        self._chat_db_combo = styled_combo()
+        self._chat_db_combo.setFixedHeight(38)
+        self._chat_db_combo.setMinimumWidth(220)
+        self._chat_db_combo.currentIndexChanged.connect(self._filter_chat_list)
+        db_lay.addWidget(self._chat_db_combo)
+        db_lay.addStretch()
+        lay.addWidget(self._chat_db_row)
+
+        self._chat_search = QLineEdit()
+        self._chat_search.setPlaceholderText("Поиск...")
+        self._chat_search.setFixedHeight(36)
+        self._chat_search.textChanged.connect(self._filter_chat_list)
+        lay.addWidget(self._chat_search)
 
         content = QHBoxLayout()
         content.setSpacing(16)
 
         left = QVBoxLayout()
-        left.addWidget(section_label("ТЕГИ"))
+        left.addWidget(section_label("ЧАТЫ"))
         self.chat_contacts = QListWidget()
         self.chat_contacts.currentRowChanged.connect(self._open_chat)
         left.addWidget(self.chat_contacts)
@@ -1739,6 +1870,12 @@ class MainWindow(QMainWindow):
         right.addWidget(self.chat_view)
         content.addLayout(right, 2)
         lay.addLayout(content)
+
+        self._chat_mode = "list"
+        self._chat_all_entries = []
+        self._chat_list_entries = []
+        self._chat_display_tags = []
+        self._switch_chat_mode("list")
         return w
 
     def _refresh_chats_accounts(self):
@@ -1746,10 +1883,32 @@ class MainWindow(QMainWindow):
         for acc in self.data["accounts"]:
             self.chat_acc_combo.addItem(f"{acc.get('name', acc['phone'])}  {acc['phone']}")
 
+    def _switch_chat_mode(self, mode):
+        self._chat_mode = mode
+        for k, btn in self._chat_mode_btns.items():
+            btn.setChecked(k == mode)
+        self._chat_db_row.setVisible(mode == "list")
+        self.chat_contacts.clear()
+        self.chat_view.clear()
+        self.chat_status_lbl.setText("")
+        self._chat_display_tags = []
+
+    def _load_chats_current_mode(self):
+        if self._chat_mode == "list":
+            self._load_chat_contacts()
+        else:
+            self._load_all_dialogs()
+
     def _load_chat_contacts(self):
         acc_idx = self.chat_acc_combo.currentIndex()
         if acc_idx < 0 or acc_idx >= len(self.data["accounts"]):
             QMessageBox.warning(self, "Ошибка", "Выберите аккаунт"); return
+        self._chat_db_combo.blockSignals(True)
+        self._chat_db_combo.clear()
+        self._chat_db_combo.addItem("Все базы")
+        for name in self.data.get("recipient_dbs", {}):
+            self._chat_db_combo.addItem(name)
+        self._chat_db_combo.blockSignals(False)
         all_recs = list(self.data.get("recipients", []))
         for db_recs in self.data.get("recipient_dbs", {}).values():
             for r in db_recs:
@@ -1757,23 +1916,63 @@ class MainWindow(QMainWindow):
                     all_recs.append(r)
         if not all_recs:
             QMessageBox.warning(self, "Ошибка", "Нет тегов ни в одной базе"); return
-        self._chat_recs = all_recs
+        self._chat_list_entries = all_recs
+        self.chat_view.clear()
+        self._filter_chat_list()
+
+    def _filter_chat_list(self):
+        query = self._chat_search.text().strip().lower()
+        if self._chat_mode == "all":
+            entries = self._chat_all_entries
+            if query:
+                entries = [e for e in entries if query in e["name"].lower() or query in e["tag"].lower()]
+            self._chat_display_tags = [e["tag"] for e in entries]
+            self.chat_contacts.clear()
+            for e in entries:
+                unread = f"  ({e['unread']})" if e["unread"] else ""
+                self.chat_contacts.addItem(f"  {e['name']}{unread}")
+            self.chat_status_lbl.setText(f"{len(entries)} чатов")
+        else:
+            db_idx = self._chat_db_combo.currentIndex()
+            if db_idx <= 0:
+                recs = list(self._chat_list_entries)
+            else:
+                db_name = self._chat_db_combo.itemText(db_idx)
+                recs = list(self.data.get("recipient_dbs", {}).get(db_name, []))
+            if query:
+                recs = [r for r in recs if query in recipient_tag(r).lower()]
+            self._chat_display_tags = [recipient_tag(r) for r in recs]
+            chat_log = self.data.get("chat_log", {})
+            self.chat_contacts.clear()
+            for tag in self._chat_display_tags:
+                suffix = "  [ответил]" if chat_log.get(tag, {}).get("replied") else ""
+                self.chat_contacts.addItem(f"  {tag}{suffix}")
+            self.chat_status_lbl.setText(f"{len(recs)} контактов")
+
+    def _load_all_dialogs(self):
+        acc_idx = self.chat_acc_combo.currentIndex()
+        if acc_idx < 0 or acc_idx >= len(self.data["accounts"]):
+            QMessageBox.warning(self, "Ошибка", "Выберите аккаунт"); return
+        self.chat_status_lbl.setText("Загружаем...")
         self.chat_contacts.clear()
         self.chat_view.clear()
-        chat_log = self.data.get("chat_log", {})
-        for r in all_recs:
-            tag = recipient_tag(r)
-            suffix = "  [ответил]" if chat_log.get(tag, {}).get("replied") else ""
-            self.chat_contacts.addItem(f"  {tag}{suffix}")
-        self.chat_status_lbl.setText("Загружено")
+        self._chat_display_tags = []
+        loader = AllDialogsLoader(self.data["accounts"][acc_idx], proxy=self._get_app_proxy())
+        loader.dialogs_loaded.connect(self._on_dialogs_loaded)
+        loader.error_signal.connect(self._on_chat_error)
+        threading.Thread(target=loader.run, daemon=True).start()
+
+    def _on_dialogs_loaded(self, dialogs):
+        self._chat_all_entries = dialogs
+        self._filter_chat_list()
 
     def _open_chat(self, row):
         if row < 0: return
         acc_idx = self.chat_acc_combo.currentIndex()
         if acc_idx < 0 or acc_idx >= len(self.data["accounts"]): return
-        recs = getattr(self, "_chat_recs", self.data.get("recipients", []))
-        if row >= len(recs): return
-        tag = recipient_tag(recs[row])
+        tags = getattr(self, "_chat_display_tags", [])
+        if row >= len(tags): return
+        tag = tags[row]
         self._chat_dots = 0
         if not hasattr(self, "_chat_timer"):
             self._chat_timer = QTimer()
@@ -1805,6 +2004,14 @@ class MainWindow(QMainWindow):
         log = self.data.setdefault("chat_log", {})
         log.setdefault(tag, {})["replied"] = replied
         save_data(self.data)
+        if self._chat_mode == "list" and replied:
+            try:
+                idx = self._chat_display_tags.index(tag)
+                item = self.chat_contacts.item(idx)
+                if item and "[ответил]" not in item.text():
+                    item.setText(item.text().rstrip() + "  [ответил]")
+            except ValueError:
+                pass
         html = []
         for m in messages:
             color  = "#4a6fa5" if m["out"] else "#6a9e80"
@@ -1812,8 +2019,8 @@ class MainWindow(QMainWindow):
             prefix = "Я"       if m["out"] else tag
             text = m["text"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             html.append(
-                f'<div style="text-align:{align}; margin:6px 0;">'
-                f'<span style="color:#3a4a68; font-size:11px;">{prefix} {m["ts"]}</span><br>'
+                f'<div style="text-align:{align}; margin:6px 0;">' +
+                f'<span style="color:#3a4a68; font-size:11px;">{prefix} {m["ts"]}</span><br>' +
                 f'<span style="color:{color};">{text}</span></div>'
             )
         self.chat_view.setHtml("".join(html))
@@ -2064,6 +2271,19 @@ if __name__ == "__main__":
 
     try:
         app = QApplication(sys.argv)
+        if LICENSE_FILE.exists():
+            saved = LICENSE_FILE.read_text(encoding="utf-8").strip()
+            ok, _ = _check_license(saved)
+            if not ok:
+                LICENSE_FILE.unlink(missing_ok=True)
+                dlg = LicenseDialog()
+                if dlg.exec_() != QDialog.Accepted:
+                    sys.exit(0)
+        else:
+            dlg = LicenseDialog()
+            if dlg.exec_() != QDialog.Accepted:
+                sys.exit(0)
+
         app.setStyle("Fusion")
         icon_file = resource_path("icon.ico")
         if Path(icon_file).exists():
