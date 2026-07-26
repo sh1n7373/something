@@ -17,7 +17,8 @@ try:
     from telethon.errors import (
         FloodWaitError, UserPrivacyRestrictedError,
         UsernameNotOccupiedError, PeerFloodError,
-        SessionPasswordNeededError,
+        SessionPasswordNeededError, AuthKeyUnregisteredError,
+        UserDeactivatedBanError, SessionRevokedError,
     )
 except ImportError:
     raise
@@ -28,6 +29,8 @@ try:
 except ImportError:
     SOCKS_AVAILABLE = False
 
+_SESSION_ERRORS = (AuthKeyUnregisteredError, UserDeactivatedBanError, SessionRevokedError)
+
 _SKIP_ERRORS = (
     "database is locked", "user not found", "username invalid",
     "nobody", "you have been blocked", "user is blocked",
@@ -35,7 +38,6 @@ _SKIP_ERRORS = (
     "deactivated", "need to buy", "paid", "slowmode",
     "allow_payment_required", "no user has", "as username",
 )
-
 
 def _session_wal(phone, chat_mode=False):
     base = phone.replace("+", "")
@@ -53,7 +55,6 @@ def _session_wal(phone, chat_mode=False):
             con.close()
         except sqlite3.OperationalError:
             pass
-
 
 def build_client(acc, proxy=None, chat_mode=False):
     base = acc["phone"].replace("+", "")
@@ -74,7 +75,6 @@ def build_client(acc, proxy=None, chat_mode=False):
                 proxy.get("user") or None, proxy.get("password") or None,
             )
     return TelegramClient(sess, acc["api_id"], acc["api_hash"], **kwargs)
-
 
 _COUNTRY_FLAGS = {
     "AD": "🇦🇩", "AE": "🇦🇪", "AF": "🇦🇫", "AG": "🇦🇬", "AI": "🇦🇮",
@@ -128,7 +128,6 @@ _COUNTRY_FLAGS = {
     "ZA": "🇿🇦", "ZM": "🇿🇲", "ZW": "🇿🇼",
 }
 
-
 class ProxyChecker(QObject):
     result_signal   = pyqtSignal(int, bool, str)
     finished_signal = pyqtSignal()
@@ -163,10 +162,6 @@ class ProxyChecker(QObject):
         try:
             ptype = proxy.get("type", "socks5").lower()
             pt = {"socks5": socks.SOCKS5, "socks4": socks.SOCKS4}.get(ptype, socks.HTTP)
-            s = socks.socksocket()
-            s.set_proxy(pt, proxy["host"], int(proxy["port"]), True,
-                        proxy.get("user") or None, proxy.get("password") or None)
-            s.settimeout(8)
             loop = asyncio.get_event_loop()
             targets = [
                 ("api.telegram.org", 443),
@@ -188,7 +183,6 @@ class ProxyChecker(QObject):
                 except Exception:
                     try: s2.close()
                     except Exception: pass
-            s.close()
             if not connected:
                 return False, "Нет соединения"
             flag = await self._get_flag(proxy["host"])
@@ -208,7 +202,6 @@ class ProxyChecker(QObject):
         except Exception:
             return ""
 
-
 class SenderWorker(QObject):
     log_signal          = pyqtSignal(str, str)
     progress_signal     = pyqtSignal(int, int)
@@ -218,16 +211,16 @@ class SenderWorker(QObject):
     current_tag_signal  = pyqtSignal(int, str)
     spamblock_signal    = pyqtSignal(int, str, str, list)
     tag_sent_signal     = pyqtSignal(int, str)
+    session_kicked_signal = pyqtSignal(int, str)
 
     def __init__(self, account, recipients, pastes, interval_min,
-                 pastes_per_recipient, proxy=None, tag_interval_min=0, worker_id=0, resume_from=None):
+                 proxy=None, tag_interval_min=0, worker_id=0, resume_from=None):
         super().__init__()
-        self.account             = account
-        self.recipients          = recipients
-        self.pastes              = pastes
-        self.interval_min        = interval_min
-        self.pastes_per_recipient = pastes_per_recipient
-        self.proxy               = proxy
+        self.account          = account
+        self.recipients       = recipients
+        self.pastes           = pastes
+        self.interval_min     = interval_min
+        self.proxy            = proxy
         self.tag_interval_min    = tag_interval_min
         self.worker_id           = worker_id
         self.resume_from         = resume_from
@@ -253,7 +246,12 @@ class SenderWorker(QObject):
             elapsed += 1
 
     def run(self):
-        asyncio.new_event_loop().run_until_complete(self._send_all())
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._send_all())
+        finally:
+            loop.close()
         self.finished_signal.emit()
 
     def _log(self, msg, lvl):
@@ -268,6 +266,10 @@ class SenderWorker(QObject):
             try:
                 await client.connect()
                 break
+            except _SESSION_ERRORS as ex:
+                self._log(f"Сессия кикнута: {ex}", "err")
+                self.session_kicked_signal.emit(self.worker_id, self.account["phone"])
+                return
             except Exception as ex:
                 err = str(ex).lower()
                 if "database is locked" in err and attempt < 4:
@@ -298,6 +300,7 @@ class SenderWorker(QObject):
             if skipping:
                 if tag == self.resume_from:
                     skipping = False
+
                 self._done += len(self.pastes)
                 continue
 
@@ -347,12 +350,30 @@ class SenderWorker(QObject):
                     self._done += 1
                     self.progress_signal.emit(self._done, total)
                     break
+                except _SESSION_ERRORS as ex:
+                    self._log(f"Сессия кикнута: {ex}", "err")
+                    self.session_kicked_signal.emit(self.worker_id, self.account["phone"])
+                    await client.disconnect()
+                    return
                 except PeerFloodError:
                     self._log("PeerFlood - опрашиваем SpamBot...", "err")
                     await client.disconnect()
                     reply, buttons = await self._query_spambot()
                     self.spamblock_signal.emit(self.worker_id, tag, reply, buttons)
-                    return
+                    if self._stop:
+                        return
+                    try:
+                        await client.connect()
+                        self._log("Переподключились после PeerFlood, продолжаем...", "ok")
+                    except _SESSION_ERRORS as ex:
+                        self._log(f"Сессия кикнута после PeerFlood: {ex}", "err")
+                        self.session_kicked_signal.emit(self.worker_id, self.account["phone"])
+                        return
+                    except Exception as ex:
+                        self._log(f"Реконнект после PeerFlood не удался: {ex}", "err")
+                        return
+                    tag_completed = False
+                    break
                 except Exception as ex:
                     err_str = str(ex).lower()
                     if "database is locked" in err_str:
@@ -361,7 +382,7 @@ class SenderWorker(QObject):
                     elif "disconnected" in err_str or "not connected" in err_str:
                         self._log(f"Соединение потеряно на {tag}, переподключаем...", "warn")
                         reconnect_try = 0
-                        while True:
+                        while reconnect_try < 15:
                             if self._stop:
                                 await client.disconnect()
                                 return
@@ -371,8 +392,17 @@ class SenderWorker(QObject):
                                 await client.connect()
                                 self._log(f"Соединение восстановлено, продолжаем с {tag}", "ok")
                                 break
+                            except _SESSION_ERRORS as ex:
+                                self._log(f"Сессия кикнута при реконнекте: {ex}", "err")
+                                self.session_kicked_signal.emit(self.worker_id, self.account["phone"])
+                                await client.disconnect()
+                                return
                             except Exception:
-                                self._log(f"Переподключение {reconnect_try}...", "warn")
+                                self._log(f"Переподключение {reconnect_try}/15...", "warn")
+                        else:
+                            self._log("Не удалось переподключиться, остановка", "err")
+                            await client.disconnect()
+                            return
                     elif any(e in err_str for e in _SKIP_ERRORS):
                         if "allow_payment_required" in err_str:
                             self._log(f"Скип {tag}: требуется оплата", "warn")
@@ -410,47 +440,46 @@ class SenderWorker(QObject):
     async def _query_spambot(self):
         last_reply, buttons = "", []
         try:
-            sb = build_client(self.account, self.proxy)
+            _session_wal(self.account["phone"], chat_mode=True)
+            sb = build_client(self.account, self.proxy, chat_mode=True)
             await sb.connect()
+            if not await sb.is_user_authorized():
+                self._log("Сессия кикнута (SpamBot: не авторизован)", "err")
+                self.session_kicked_signal.emit(self.worker_id, self.account["phone"])
+                await sb.disconnect()
+                return last_reply, buttons
+            from datetime import timezone as _tz
+            import datetime as _dt
+            sent_at = _dt.datetime.now(_tz.utc)
             for attempt in range(3):
-                self._log(f"SpamBot /start попытка {attempt+1}/3", "warn")
+                self._log(f"SpamBot /start {attempt+1}/3", "warn")
                 try:
                     await sb.send_message("@SpamBot", "/start")
                 except Exception as ex:
-                    self._log(f"SpamBot send ошибка: {ex}", "err")
-                    await asyncio.sleep(10)
+                    self._log(f"SpamBot ошибка: {ex}", "err")
+                await asyncio.sleep(10)
+            reply_text, btn_labels = "", []
+            async for m in sb.iter_messages("@SpamBot", limit=5):
+                if m.out:
                     continue
-                reply_text, btn_labels = "", []
-                for _ in range(10):
-                    await asyncio.sleep(3)
-                    async for m in sb.iter_messages("@SpamBot", limit=3):
-                        if m.out:
-                            continue
-                        if m.message:
-                            reply_text = m.message
-                            if m.reply_markup:
-                                try:
-                                    for row in m.reply_markup.rows:
-                                        for btn in row.buttons:
-                                            if hasattr(btn, "text"):
-                                                btn_labels.append(btn.text)
-                                except AttributeError:
-                                    pass
-                            break
-                    if reply_text:
-                        break
-                if reply_text:
-                    last_reply, buttons = reply_text, btn_labels
-                    self._log(f"SpamBot ответ: {reply_text[:120]}", "warn")
+                if m.message and m.date.replace(tzinfo=_tz.utc) >= sent_at:
+                    reply_text = m.message
+                    if m.reply_markup:
+                        try:
+                            for row in m.reply_markup.rows:
+                                for btn in row.buttons:
+                                    if hasattr(btn, "text"):
+                                        btn_labels.append(btn.text)
+                        except AttributeError:
+                            pass
                     break
-                if attempt < 2:
-                    self._log("SpamBot не ответил, ждём 20 сек...", "warn")
-                    await asyncio.sleep(20)
+            if reply_text:
+                last_reply, buttons = reply_text, btn_labels
+                self._log(f"SpamBot ответ: {reply_text[:120]}", "warn")
             await sb.disconnect()
         except Exception as ex:
             self._log(f"SpamBot ошибка: {ex}", "err")
         return last_reply, buttons
-
 
 class ChatLoader(QObject):
     messages_loaded = pyqtSignal(str, list)
@@ -465,11 +494,15 @@ class ChatLoader(QObject):
     def run(self):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(self._load())
+        try:
+            loop.run_until_complete(self._load())
+        finally:
+            loop.close()
 
     async def _load(self):
+        _session_wal(self.account["phone"], chat_mode=True)
         try:
-            client = build_client(self.account, self.proxy)
+            client = build_client(self.account, self.proxy, chat_mode=True)
             await client.connect()
             if not await client.is_user_authorized():
                 self.error_signal.emit("Аккаунт не авторизован")
@@ -487,7 +520,6 @@ class ChatLoader(QObject):
         except Exception as ex:
             self.error_signal.emit(str(ex))
 
-
 class SpamBotLoader(QObject):
     result_signal = pyqtSignal(str, list)
     error_signal  = pyqtSignal(str)
@@ -502,7 +534,10 @@ class SpamBotLoader(QObject):
     def run(self):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(self._load())
+        try:
+            loop.run_until_complete(self._load())
+        finally:
+            loop.close()
 
     async def _load(self):
         _session_wal(self.account["phone"], chat_mode=True)
@@ -534,7 +569,6 @@ class SpamBotLoader(QObject):
         except Exception as ex:
             self.error_signal.emit(str(ex))
 
-
 class FingerprintChecker(QObject):
     result_signal = pyqtSignal(dict)
     error_signal  = pyqtSignal(str)
@@ -547,11 +581,15 @@ class FingerprintChecker(QObject):
     def run(self):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(self._check())
+        try:
+            loop.run_until_complete(self._check())
+        finally:
+            loop.close()
 
     async def _check(self):
+        _session_wal(self.account["phone"], chat_mode=True)
         try:
-            client = build_client(self.account, self.proxy)
+            client = build_client(self.account, self.proxy, chat_mode=True)
             await client.connect()
             if not await client.is_user_authorized():
                 self.error_signal.emit("Аккаунт не авторизован")
@@ -580,8 +618,6 @@ class FingerprintChecker(QObject):
         except Exception as ex:
             self.error_signal.emit(str(ex))
 
-
-
 class ChatLoaderRetry(QObject):
     messages_loaded = pyqtSignal(str, list)
     error_signal    = pyqtSignal(str)
@@ -595,7 +631,10 @@ class ChatLoaderRetry(QObject):
     def run(self):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(self._load())
+        try:
+            loop.run_until_complete(self._load())
+        finally:
+            loop.close()
 
     async def _load(self):
         _session_wal(self.account["phone"], chat_mode=True)
@@ -626,3 +665,48 @@ class ChatLoaderRetry(QObject):
                 else:
                     self.error_signal.emit(str(ex))
                     return
+
+class AllDialogsLoader(QObject):
+    dialogs_loaded = pyqtSignal(list)
+    error_signal   = pyqtSignal(str)
+
+    def __init__(self, account, proxy=None):
+        super().__init__()
+        self.account = account
+        self.proxy   = proxy
+
+    def run(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._load())
+        finally:
+            loop.close()
+
+    async def _load(self):
+        _session_wal(self.account["phone"], chat_mode=True)
+        try:
+            client = build_client(self.account, self.proxy, chat_mode=True)
+            await client.connect()
+            if not await client.is_user_authorized():
+                self.error_signal.emit("Аккаунт не авторизован")
+                await client.disconnect()
+                return
+            result = []
+            async for dialog in client.iter_dialogs(limit=500):
+                entity  = dialog.entity
+                uname   = getattr(entity, "username", None)
+                tag     = f"@{uname}" if uname else str(entity.id)
+                last    = ""
+                if dialog.message and getattr(dialog.message, "message", None):
+                    last = dialog.message.message[:80]
+                result.append({
+                    "name":   dialog.name or tag,
+                    "tag":    tag,
+                    "unread": dialog.unread_count,
+                    "last":   last,
+                })
+            await client.disconnect()
+            self.dialogs_loaded.emit(result)
+        except Exception as ex:
+            self.error_signal.emit(str(ex))
