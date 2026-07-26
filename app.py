@@ -33,15 +33,12 @@ from widgets import (
 )
 from updater import APP_VERSION, check_for_update, show_update_dialog, pending_version
 
-
 def resource_path(name):
     base = getattr(sys, "_MEIPASS", Path(__file__).parent)
     return str(Path(base) / name)
 
-
 LICENSE_SERVER = "http://твой_ip:8000"
 LICENSE_FILE   = APP_DIR / "license.key"
-
 
 def _check_license(key: str) -> tuple[bool, str]:
     try:
@@ -58,7 +55,6 @@ def _check_license(key: str) -> tuple[bool, str]:
         return result.get("valid", False), result.get("message", "")
     except Exception as ex:
         return False, f"Нет связи с сервером: {ex}"
-
 
 class LicenseDialog(QDialog):
     def __init__(self):
@@ -107,7 +103,6 @@ class LicenseDialog(QDialog):
         else:
             self._status.setStyleSheet("font-size:12px; color:#e06c75;")
             self._status.setText(msg or "Недействительный ключ")
-
 
 class AuthDialog(QDialog):
     _sig_status  = pyqtSignal(str)
@@ -312,16 +307,12 @@ class AuthDialog(QDialog):
         self._loop.call_soon_threadsafe(self._loop.stop)
         super().closeEvent(e)
 
-
 def _acc_label(acc):
     un = f"@{acc['username']}" if acc.get("username") else ""
     return f"{acc.get('name', acc['phone'])}  {un}  {acc['phone']}"
 
-
 def _proxy_label(p):
     return f"{p['type'].upper()}  {p['host']}:{p['port']}"
-
-
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -2247,9 +2238,6 @@ class MainWindow(QMainWindow):
             self._spam_status_timer.stop()
         if not hasattr(self, "_spam_reply"): return
         self._spam_reply.setPlainText(f"Ошибка: {err}")
-
-
-
 
 if __name__ == "__main__":
     import traceback
