@@ -340,6 +340,15 @@ class SenderWorker(QObject):
                     await client.send_message(tag_str, text)
                     self._log(f"ok  {tag_str}", "ok")
                     pastes_sent += 1
+                    try:
+                        from telethon import functions, types
+                        entity = await client.get_input_entity(tag_str)
+                        await client(functions.account.UpdateNotifySettingsRequest(
+                            peer=types.InputNotifyPeer(peer=entity),
+                            settings=types.InputPeerNotifySettings(mute_until=0)
+                        ))
+                    except Exception:
+                        pass
                 except FloodWaitError as e:
                     self._log(f"Flood {e.seconds}s  {tag}", "warn")
                     await self._sleep(e.seconds)
@@ -450,32 +459,49 @@ class SenderWorker(QObject):
                 return last_reply, buttons
             from datetime import timezone as _tz
             import datetime as _dt
-            sent_at = _dt.datetime.now(_tz.utc)
+
+            def _restrictions_lifted(text):
+                t = text.lower()
+                return any(k in t for k in ("no limits", "good news", "нет ограничений", "хорошие новости", "lifted"))
+
             for attempt in range(3):
                 self._log(f"SpamBot /start {attempt+1}/3", "warn")
+                sent_at = _dt.datetime.now(_tz.utc)
                 try:
                     await sb.send_message("@SpamBot", "/start")
                 except Exception as ex:
                     self._log(f"SpamBot ошибка: {ex}", "err")
-                await asyncio.sleep(10)
-            reply_text, btn_labels = "", []
-            async for m in sb.iter_messages("@SpamBot", limit=5):
-                if m.out:
                     continue
-                if m.message and m.date.replace(tzinfo=_tz.utc) >= sent_at:
-                    reply_text = m.message
-                    if m.reply_markup:
-                        try:
-                            for row in m.reply_markup.rows:
-                                for btn in row.buttons:
-                                    if hasattr(btn, "text"):
-                                        btn_labels.append(btn.text)
-                        except AttributeError:
-                            pass
-                    break
-            if reply_text:
-                last_reply, buttons = reply_text, btn_labels
-                self._log(f"SpamBot ответ: {reply_text[:120]}", "warn")
+                reply_text, btn_labels = "", []
+                for _ in range(10):
+                    await asyncio.sleep(3)
+                    async for m in sb.iter_messages("@SpamBot", limit=5):
+                        if m.out:
+                            continue
+                        if m.message and m.date.replace(tzinfo=_tz.utc) >= sent_at:
+                            reply_text = m.message
+                            if m.reply_markup:
+                                try:
+                                    for row in m.reply_markup.rows:
+                                        for btn in row.buttons:
+                                            if hasattr(btn, "text"):
+                                                btn_labels.append(btn.text)
+                                except AttributeError:
+                                    pass
+                            break
+                    if reply_text:
+                        break
+                if reply_text:
+                    last_reply, buttons = reply_text, btn_labels
+                    self._log(f"SpamBot ответ: {reply_text[:120]}", "warn")
+                    if _restrictions_lifted(reply_text):
+                        self._log("Ограничения сняты, продолжаем", "ok")
+                        break
+                    if attempt < 2:
+                        self._log("Ограничения не сняты, пробуем ещё раз...", "warn")
+                else:
+                    if attempt < 2:
+                        self._log("SpamBot не ответил, пробуем ещё раз...", "warn")
             await sb.disconnect()
         except Exception as ex:
             self._log(f"SpamBot ошибка: {ex}", "err")
