@@ -292,7 +292,14 @@ class SenderWorker(QObject):
         first = True
         tags_in_list = [recipient_tag(r) for r in self.recipients]
         skipping = self.resume_from is not None
-        tags_done = 0 and self.resume_from in tags_in_list
+        tags_done = 0
+        _unmute_client = None
+        try:
+            _session_wal(self.account["phone"], chat_mode=True)
+            _unmute_client = build_client(self.account, self.proxy, chat_mode=True)
+            await _unmute_client.connect()
+        except Exception:
+            _unmute_client = None and self.resume_from in tags_in_list
 
         for rec in self.recipients:
             tag   = recipient_tag(rec)
@@ -341,17 +348,6 @@ class SenderWorker(QObject):
                     await client.send_message(tag_str, text)
                     self._log(f"ok  {tag_str}", "ok")
                     pastes_sent += 1
-                    try:
-                        from telethon import functions, types
-                        _e = await asyncio.wait_for(
-                            client.get_input_entity(tag_str), timeout=4)
-                        await asyncio.wait_for(
-                            client(functions.account.UpdateNotifySettingsRequest(
-                                peer=types.InputNotifyPeer(peer=_e),
-                                settings=types.InputPeerNotifySettings(mute_until=0)
-                            )), timeout=4)
-                    except Exception:
-                        pass
                 except FloodWaitError as e:
                     self._log(f"Flood {e.seconds}s  {tag}", "warn")
                     await self._sleep(e.seconds)
