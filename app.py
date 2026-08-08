@@ -37,7 +37,7 @@ def resource_path(name):
     base = getattr(sys, "_MEIPASS", Path(__file__).parent)
     return str(Path(base) / name)
 
-LICENSE_SERVER = "http://89.125.120.206:8000"
+LICENSE_SERVER = "http://твой_ip:8000"
 LICENSE_FILE   = APP_DIR / "license.key"
 
 def _check_license(key: str) -> tuple[bool, str]:
@@ -1231,8 +1231,9 @@ class MainWindow(QMainWindow):
         gl.setSpacing(32)
 
         for attr, lbl_text, mn, mx, default, suffix, hint_text in [
-            ("interval_spin",     "ИНТЕРВАЛ СООБЩЕНИЙ (МИН)",    0, 60,   2, " мин", None),
-            ("tag_interval_spin", "ИНТЕРВАЛ МЕЖДУ ТЕГАМИ (МИН)", 0, 1440, 0, " мин", "0 = без интервала"),
+            ("interval_spin",     "ИНТЕРВАЛ СООБЩЕНИЙ (МИН)",    0, 60,   2,     " мин",   None),
+            ("tag_interval_spin", "ИНТЕРВАЛ МЕЖДУ ТЕГАМИ (МИН)", 0, 1440, 0,     " мин",   "0 = без интервала"),
+            ("tag_limit_spin",    "ЛИМИТ ТЕГОВ",                  0, 99999, 0,    " тегов", "0 = все"),
         ]:
             col = QVBoxLayout()
             col.addWidget(section_label(lbl_text))
@@ -1491,6 +1492,7 @@ class MainWindow(QMainWindow):
             tag_interval_min=self.tag_interval_spin.value(),
             worker_id=idx,
             resume_from=self.data.get("worker_last_tag", {}).get(str(idx)),
+            tag_limit=self.tag_limit_spin.value(),
         )
         worker.log_signal.connect(self._on_log)
         worker.progress_signal.connect(lambda d, t, i=idx: self._on_worker_progress(i, d, t))
@@ -2259,6 +2261,18 @@ if __name__ == "__main__":
 
     try:
         app = QApplication(sys.argv)
+        app.setStyle("Fusion")
+        icon_file = resource_path("icon.ico")
+        if Path(icon_file).exists():
+            app.setWindowIcon(QIcon(icon_file))
+
+        threading.Thread(target=check_for_update, daemon=True).start()
+        import time as _time
+        _time.sleep(2)
+        if pending_version():
+            show_update_dialog(None, STYLE)
+            sys.exit(0)
+
         if LICENSE_FILE.exists():
             saved = LICENSE_FILE.read_text(encoding="utf-8").strip()
             ok, _ = _check_license(saved)
@@ -2272,10 +2286,6 @@ if __name__ == "__main__":
             if dlg.exec_() != QDialog.Accepted:
                 sys.exit(0)
 
-        app.setStyle("Fusion")
-        icon_file = resource_path("icon.ico")
-        if Path(icon_file).exists():
-            app.setWindowIcon(QIcon(icon_file))
         win = MainWindow()
         if Path(icon_file).exists():
             win.setWindowIcon(QIcon(icon_file))
@@ -2287,7 +2297,6 @@ if __name__ == "__main__":
             else:
                 QTimer.singleShot(2000, _poll)
 
-        threading.Thread(target=check_for_update, daemon=True).start()
         QTimer.singleShot(3000, _poll)
         sys.exit(app.exec_())
     except Exception:
