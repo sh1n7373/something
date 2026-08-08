@@ -343,11 +343,11 @@ class SenderWorker(QObject):
                     pastes_sent += 1
                     try:
                         from telethon import functions, types
-                        entity = await client.get_input_entity(tag_str)
-                        await client(functions.account.UpdateNotifySettingsRequest(
-                            peer=types.InputNotifyPeer(peer=entity),
+                        _ent = await asyncio.wait_for(client.get_input_entity(tag_str), timeout=5)
+                        await asyncio.wait_for(client(functions.account.UpdateNotifySettingsRequest(
+                            peer=types.InputNotifyPeer(peer=_ent),
                             settings=types.InputPeerNotifySettings(mute_until=0)
-                        ))
+                        )), timeout=5)
                     except Exception:
                         pass
                 except FloodWaitError as e:
