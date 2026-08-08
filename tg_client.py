@@ -214,7 +214,7 @@ class SenderWorker(QObject):
     session_kicked_signal = pyqtSignal(int, str)
 
     def __init__(self, account, recipients, pastes, interval_min,
-                 proxy=None, tag_interval_min=0, worker_id=0, resume_from=None):
+                 proxy=None, tag_interval_min=0, worker_id=0, resume_from=None, tag_limit=0):
         super().__init__()
         self.account          = account
         self.recipients       = recipients
@@ -291,7 +291,8 @@ class SenderWorker(QObject):
         self._done = 0
         first = True
         tags_in_list = [recipient_tag(r) for r in self.recipients]
-        skipping = self.resume_from is not None and self.resume_from in tags_in_list
+        skipping = self.resume_from is not None
+        tags_done = 0 and self.resume_from in tags_in_list
 
         for rec in self.recipients:
             tag   = recipient_tag(rec)
@@ -443,6 +444,12 @@ class SenderWorker(QObject):
 
             if tag_completed and pastes_sent == len(self.pastes):
                 self.tag_sent_signal.emit(self.worker_id, tag)
+                if self.tag_limit > 0:
+                    tags_done += 1
+                    if tags_done >= self.tag_limit:
+                        self._log(f"Лимит {self.tag_limit} тегов достигнут, останавливаемся", "ok")
+                        await client.disconnect()
+                        return
 
         await client.disconnect()
 
