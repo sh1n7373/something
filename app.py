@@ -37,7 +37,7 @@ def resource_path(name):
     base = getattr(sys, "_MEIPASS", Path(__file__).parent)
     return str(Path(base) / name)
 
-LICENSE_SERVER = "http://89.125.120.206:8000"
+LICENSE_SERVER = "http://твой_ip:8000"
 LICENSE_FILE   = APP_DIR / "license.key"
 
 def _check_license(key: str) -> tuple[bool, str]:
@@ -2271,7 +2271,6 @@ if __name__ == "__main__":
         _time.sleep(2)
         if pending_version():
             show_update_dialog(None, STYLE)
-            sys.exit(0)
 
         if LICENSE_FILE.exists():
             saved = LICENSE_FILE.read_text(encoding="utf-8").strip()
