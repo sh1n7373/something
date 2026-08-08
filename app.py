@@ -37,7 +37,7 @@ def resource_path(name):
     base = getattr(sys, "_MEIPASS", Path(__file__).parent)
     return str(Path(base) / name)
 
-LICENSE_SERVER = "89.125.120.206:8000"
+LICENSE_SERVER = "http://89.125.120.206:8000"
 LICENSE_FILE   = APP_DIR / "license.key"
 
 def _check_license(key: str) -> tuple[bool, str]:
