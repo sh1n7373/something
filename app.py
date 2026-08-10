@@ -37,7 +37,7 @@ def resource_path(name):
     base = getattr(sys, "_MEIPASS", Path(__file__).parent)
     return str(Path(base) / name)
 
-LICENSE_SERVER = "http://89.125.120.206:8000"
+LICENSE_SERVER = "http://твой_ip:8000"
 LICENSE_FILE   = APP_DIR / "license.key"
 
 def _check_license(key: str) -> tuple[bool, str]:
@@ -1650,6 +1650,7 @@ class MainWindow(QMainWindow):
             self.data["worker_last_tag"] = {}
         self.data["worker_last_tag"].pop(str(wid), None)
         save_data(self.data)
+        self._refresh_recipients()
 
     def _on_session_kicked(self, worker_id, phone):
         self._on_log(f"[W{worker_id+1}] СЕССИЯ КИКНУТА — {phone}", "err")
