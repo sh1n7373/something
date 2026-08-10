@@ -321,7 +321,7 @@ class SenderWorker(QObject):
         first = True
         tags_in_list = [recipient_tag(r) for r in self.recipients]
         skipping  = self.resume_from is not None
-        tags_done = 0 and self.resume_from in tags_in_list
+        tags_done = 0
 
         for rec in self.recipients:
             tag   = recipient_tag(rec)
@@ -349,9 +349,12 @@ class SenderWorker(QObject):
             self._current_tag = tag
             self.current_tag_signal.emit(self.worker_id, tag)
 
-            tag_completed = True
-            pastes_sent = 0
-            for i, paste in enumerate(self.pastes):
+            _peer_flood_retry = True
+            while _peer_flood_retry:
+              _peer_flood_retry = False
+              tag_completed = True
+              pastes_sent = 0
+              for i, paste in enumerate(self.pastes):
                 if self._stop:
                     self._log("Остановлена", "warn")
                     await client.disconnect()
@@ -390,13 +393,26 @@ class SenderWorker(QObject):
                 except PeerFloodError:
                     self._log("PeerFlood - опрашиваем SpamBot...", "err")
                     await client.disconnect()
-                    reply, buttons = await self._query_spambot()
+                    reply, buttons, lifted = await self._query_spambot()
                     self.spamblock_signal.emit(self.worker_id, tag, reply, buttons)
-                    # Останавливаем воркер полностью — аккаунт заблокирован,
-                    # продолжать отправку другим получателям бессмысленно.
-                    # При следующем запуске resume_from укажет на тег ПОСЛЕ
-                    # заблокированного (см. логику skipping ниже).
-                    return
+                    if self._stop:
+                        return
+                    if not lifted:
+                        self._log("Ограничения не сняты после 3 попыток, останавливаемся", "err")
+                        return
+                    try:
+                        await client.connect()
+                        self._log("Переподключились, повторяем тег...", "ok")
+                    except _SESSION_ERRORS as ex:
+                        self._log(f"Сессия кикнута: {ex}", "err")
+                        self.session_kicked_signal.emit(self.worker_id, self.account["phone"])
+                        return
+                    except Exception as ex:
+                        self._log(f"Реконнект не удался: {ex}", "err")
+                        return
+                    _peer_flood_retry = True
+                    tag_completed = False
+                    break
                 except Exception as ex:
                     err_str = str(ex).lower()
                     if "database is locked" in err_str:
@@ -450,19 +466,19 @@ class SenderWorker(QObject):
                 if i < len(self.pastes) - 1 and self.interval_min > 0:
                     await self._sleep(self.interval_min * 60)
 
-            if tag_completed and pastes_sent == len(self.pastes):
-                self.tag_sent_signal.emit(self.worker_id, tag)
-                if self.tag_limit > 0:
-                    tags_done += 1
-                    if tags_done >= self.tag_limit:
-                        self._log(f"Лимит {self.tag_limit} тегов достигнут, останавливаемся", "ok")
-                        await client.disconnect()
-                        return
+              if tag_completed and pastes_sent == len(self.pastes):
+                  self.tag_sent_signal.emit(self.worker_id, tag)
+                  if self.tag_limit > 0:
+                      tags_done += 1
+                      if tags_done >= self.tag_limit:
+                          self._log(f"Лимит {self.tag_limit} тегов достигнут, останавливаемся", "ok")
+                          await client.disconnect()
+                          return
 
         await client.disconnect()
 
     async def _query_spambot(self):
-        last_reply, buttons = "", []
+        last_reply, buttons, lifted = "", [], False
         try:
             _session_wal(self.account["phone"], chat_mode=True)
             sb = build_client(self.account, self.proxy, chat_mode=True)
@@ -471,22 +487,30 @@ class SenderWorker(QObject):
                 self._log("Сессия кикнута (SpamBot: не авторизован)", "err")
                 self.session_kicked_signal.emit(self.worker_id, self.account["phone"])
                 await sb.disconnect()
-                return last_reply, buttons
+                return last_reply, buttons, lifted
+
+            def _restrictions_lifted(text):
+                t = text.lower()
+                return any(k in t for k in ("no limits", "good news", "нет ограничений", "хорошие новости", "lifted"))
+
+            from datetime import timezone as _tz
+            import datetime as _dt
+
             for attempt in range(3):
-                self._log(f"SpamBot /start попытка {attempt+1}/3", "warn")
+                self._log(f"SpamBot /start {attempt+1}/3", "warn")
+                sent_at = _dt.datetime.now(_tz.utc)
                 try:
                     await sb.send_message("@SpamBot", "/start")
                 except Exception as ex:
-                    self._log(f"SpamBot send ошибка: {ex}", "err")
-                    await asyncio.sleep(10)
+                    self._log(f"SpamBot ошибка отправки: {ex}", "err")
                     continue
                 reply_text, btn_labels = "", []
                 for _ in range(10):
                     await asyncio.sleep(3)
-                    async for m in sb.iter_messages("@SpamBot", limit=3):
+                    async for m in sb.iter_messages("@SpamBot", limit=5):
                         if m.out:
                             continue
-                        if m.message:
+                        if m.message and m.date.replace(tzinfo=_tz.utc) >= sent_at:
                             reply_text = m.message
                             if m.reply_markup:
                                 try:
@@ -502,15 +526,19 @@ class SenderWorker(QObject):
                 if reply_text:
                     last_reply, buttons = reply_text, btn_labels
                     self._log(f"SpamBot ответ: {reply_text[:120]}", "warn")
-                    break
-                if attempt < 2:
-                    self._log("SpamBot не ответил, ждём 20 сек...", "warn")
-                    await asyncio.sleep(20)
+                    if _restrictions_lifted(reply_text):
+                        self._log("Ограничения сняты, продолжаем", "ok")
+                        lifted = True
+                        break
+                    if attempt < 2:
+                        self._log("Ограничения не сняты, пробуем ещё раз...", "warn")
+                else:
+                    if attempt < 2:
+                        self._log("SpamBot не ответил, пробуем ещё раз...", "warn")
             await sb.disconnect()
         except Exception as ex:
             self._log(f"SpamBot ошибка: {ex}", "err")
-        return last_reply, buttons
-
+        return last_reply, buttons, lifted
 
 class ChatLoader(QObject):
     messages_loaded = pyqtSignal(str, list)
