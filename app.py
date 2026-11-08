@@ -1416,12 +1416,38 @@ class MainWindow(QMainWindow):
         btn_row.addStretch()
         cl.addLayout(btn_row)
 
+        reply_row = QHBoxLayout()
+        reply_row.setSpacing(16)
+
+        reply_card = QFrame()
+        reply_card.setObjectName("card")
+        reply_card.setMinimumHeight(80)
+        reply_card.setMaximumWidth(160)
+        rc_lay = QVBoxLayout(reply_card)
+        rc_lay.setContentsMargins(16, 12, 16, 12)
+        rc_lay.setSpacing(6)
+        rl = QLabel("ОТВЕТИЛИ")
+        rl.setStyleSheet("background: transparent; font-size: 10px; font-weight: 700; color: #6b82c0; letter-spacing: 1.8px;")
+        rc_lay.addWidget(rl)
+        replied_lbl = QLabel("0")
+        replied_lbl.setStyleSheet("background: transparent; font-size: 32px; font-weight: 700; color: #c8d8f0; letter-spacing: -1px;")
+        rc_lay.addWidget(replied_lbl)
+        rc_lay.addStretch()
+        reply_row.addWidget(reply_card)
+
+        replied_list = QListWidget()
+        replied_list.setFixedHeight(80)
+        replied_list.setStyleSheet(PROXY_LIST_STYLE)
+        reply_row.addWidget(replied_list, 1)
+        cl.addLayout(reply_row)
+
         self._wc_layout.addWidget(card)
         self._worker_cards.append({
             "card": card, "acc_combo": acc_combo, "proxy_combo": proxy_combo,
             "paste_list": paste_lw, "rec_combo": rec_combo,
             "start_btn": start_btn, "pause_btn": pause_btn, "reset_btn": reset_btn,
             "cur_tag_lbl": cur_tag_lbl,
+            "replied_lbl": replied_lbl, "replied_list": replied_list,
         })
 
     def _sync_worker_rec_combos(self):
@@ -1484,6 +1510,8 @@ class MainWindow(QMainWindow):
         acc = self.data["accounts"][acc_idx]
         pi = cd["proxy_combo"].currentIndex()
         proxy = self.data.get("proxies", [])[pi - 1] if pi > 0 and pi - 1 < len(self.data.get("proxies", [])) else None
+        if proxy is None:
+            proxy = self._get_app_proxy()
 
         worker = SenderWorker(
             acc, recs, pastes,
@@ -1493,6 +1521,7 @@ class MainWindow(QMainWindow):
             worker_id=idx,
             resume_from=self.data.get("worker_last_tag", {}).get(str(idx)),
             tag_limit=self.tag_limit_spin.value(),
+            paid_tags=self.data.get("paid_tags", []),
         )
         worker.log_signal.connect(self._on_log)
         worker.progress_signal.connect(lambda d, t, i=idx: self._on_worker_progress(i, d, t))
@@ -1503,6 +1532,8 @@ class MainWindow(QMainWindow):
         worker.spamblock_signal.connect(self._on_spamblock)
         worker.tag_sent_signal.connect(self._on_tag_sent)
         worker.session_kicked_signal.connect(self._on_session_kicked)
+        worker.reply_signal.connect(self._on_worker_reply)
+        worker.paid_tag_signal.connect(self._on_paid_tag)
 
         self._workers[idx] = worker
         self._worker_totals[idx] = len(recs) * len(pastes)
@@ -1542,6 +1573,8 @@ class MainWindow(QMainWindow):
         cd["pause_btn"].setEnabled(True)
         cd["pause_btn"].setText("Пауза")
         cd["cur_tag_lbl"].setText("")
+        cd["replied_lbl"].setText("0")
+        cd["replied_list"].clear()
         self._worker_paused[idx] = False
         proxy_info = f"  прокси: {_proxy_label(proxy)}" if proxy else ""
         self._on_log(f"[W{idx+1}] Запущен  {len(recs)} тегов  {len(pastes)} паст{proxy_info}", "info")
@@ -1651,6 +1684,30 @@ class MainWindow(QMainWindow):
         self.data["worker_last_tag"].pop(str(wid), None)
         save_data(self.data)
         self._refresh_recipients()
+
+    def _on_worker_reply(self, wid, tag):
+        if wid >= len(self._worker_cards):
+            return
+        cd = self._worker_cards[wid]
+        lw = cd["replied_list"]
+        for i in range(lw.count()):
+            if lw.item(i).text() == tag:
+                return
+        lw.addItem(tag)
+        count = lw.count()
+        lbl = cd["replied_lbl"]
+        lbl.setText(str(count))
+        lbl.setStyleSheet("background: transparent; font-size: 32px; font-weight: 700; color: #6b9ed4; letter-spacing: -1px;")
+        QTimer.singleShot(300, lambda: lbl.setStyleSheet(
+            "background: transparent; font-size: 32px; font-weight: 700; color: #c8d8f0; letter-spacing: -1px;"))
+
+    def _on_paid_tag(self, tag):
+        paid = self.data.get("paid_tags", [])
+        if tag not in paid:
+            paid.append(tag)
+            self.data["paid_tags"] = paid
+            save_data(self.data)
+            self._on_log(f"Платный тег сохранён: {tag}", "warn")
 
     def _on_session_kicked(self, worker_id, phone):
         self._on_log(f"[W{worker_id+1}] СЕССИЯ КИКНУТА — {phone}", "err")
