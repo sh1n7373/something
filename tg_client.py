@@ -216,18 +216,20 @@ class ProxyChecker(QObject):
 
 
 class SenderWorker(QObject):
-    log_signal          = pyqtSignal(str, str)
-    progress_signal     = pyqtSignal(int, int)
-    finished_signal     = pyqtSignal()
-    failed_signal       = pyqtSignal(str)
+    log_signal           = pyqtSignal(str, str)
+    progress_signal      = pyqtSignal(int, int)
+    finished_signal      = pyqtSignal()
+    failed_signal        = pyqtSignal(str)
     failed_detail_signal = pyqtSignal(str, str)
-    current_tag_signal  = pyqtSignal(int, str)
-    spamblock_signal      = pyqtSignal(int, str, str, list)
-    tag_sent_signal       = pyqtSignal(int, str)
+    current_tag_signal   = pyqtSignal(int, str)
+    spamblock_signal     = pyqtSignal(int, str, str, list)
+    tag_sent_signal      = pyqtSignal(int, str)
     session_kicked_signal = pyqtSignal(int, str)
+    reply_signal         = pyqtSignal(int, str)
+    paid_tag_signal      = pyqtSignal(str)
 
     def __init__(self, account, recipients, pastes, interval_min,
-                 proxy=None, tag_interval_min=0, worker_id=0, resume_from=None, tag_limit=0):
+                 proxy=None, tag_interval_min=0, worker_id=0, resume_from=None, tag_limit=0, paid_tags=None):
         super().__init__()
         self.account      = account
         self.recipients   = recipients
@@ -235,13 +237,15 @@ class SenderWorker(QObject):
         self.interval_min = interval_min
         self.proxy        = proxy
         self.tag_limit    = tag_limit
-        self.tag_interval_min    = tag_interval_min
-        self.worker_id           = worker_id
-        self.resume_from         = resume_from
-        self._stop  = False
-        self._pause = False
-        self._done  = 0
+        self.tag_interval_min = tag_interval_min
+        self.worker_id        = worker_id
+        self.resume_from      = resume_from
+        self.paid_tags        = set(paid_tags or [])
+        self._stop        = False
+        self._pause       = False
+        self._done        = 0
         self._current_tag = None
+        self._replied_tags = []
 
     def stop(self):   self._stop  = True
     def pause(self):  self._pause = True
@@ -297,9 +301,23 @@ class SenderWorker(QObject):
             await client.disconnect()
             return
 
+        still_paid = set()
+        for ptag in list(self.paid_tags):
+            try:
+                await client.send_message(ptag, self.pastes[0])
+                self._log(f"Платный тег отписан: {ptag}", "ok")
+            except Exception as ex:
+                if "allow_payment_required" in str(ex).lower():
+                    still_paid.add(ptag)
+                    self._log(f"Платный тег ещё не снят: {ptag}", "warn")
+                else:
+                    self._log(f"Платный тег {ptag}: {ex}", "warn")
+        self.paid_tags = still_paid
+
         total = len(self.recipients) * len(self.pastes)
         self._done = 0
         first = True
+        prev_sent = False
         tags_in_list = [recipient_tag(r) for r in self.recipients]
         skipping  = self.resume_from is not None
         tags_done = 0
@@ -317,7 +335,7 @@ class SenderWorker(QObject):
                 self._done += len(self.pastes)
                 continue
 
-            if not first:
+            if not first and prev_sent:
                 wait = self.tag_interval_min if self.tag_interval_min > 0 else self.interval_min
                 if wait > 0:
                     if self.tag_interval_min > 0:
@@ -327,6 +345,7 @@ class SenderWorker(QObject):
                     await client.disconnect()
                     return
             first = False
+            prev_sent = False
             self._current_tag = tag
             self.current_tag_signal.emit(self.worker_id, tag)
 
@@ -353,6 +372,14 @@ class SenderWorker(QObject):
                     await client.send_message(tag_str, text)
                     self._log(f"ok  {tag_str}", "ok")
                     pastes_sent += 1
+                    try:
+                        async for m in client.iter_messages(tag_str, limit=1):
+                            if not m.out and m.message:
+                                if tag_str not in self._replied_tags:
+                                    self._replied_tags.append(tag_str)
+                                    self.reply_signal.emit(self.worker_id, tag_str)
+                    except Exception:
+                        pass
                 except FloodWaitError as e:
                     self._log(f"Flood {e.seconds}s  {tag}", "warn")
                     await self._sleep(e.seconds)
@@ -362,20 +389,18 @@ class SenderWorker(QObject):
                     self.failed_detail_signal.emit(tag, "Приватность или пользователь не найден")
                     self._done += 1
                     self.progress_signal.emit(self._done, total)
+                    tag_completed = False
                     break
                 except PeerFloodError:
                     self._log("PeerFlood - опрашиваем SpamBot...", "err")
                     reply, buttons, lifted = await self._query_spambot(client)
-                    self.spamblock_signal.emit(self.worker_id, tag, reply, buttons)
-                    if self._stop:
+                    if lifted:
+                        self._log(f"Спамблок снят, продолжаем с {tag}", "ok")
+                        continue
+                    else:
+                        self.spamblock_signal.emit(self.worker_id, tag, reply, buttons)
                         await client.disconnect()
                         return
-                    if not lifted:
-                        self._log("Ограничения не сняты, останавливаемся", "err")
-                        await client.disconnect()
-                        return
-                    tag_completed = False
-                    break
                 except Exception as ex:
                     err_str = str(ex).lower()
                     if "database is locked" in err_str:
@@ -403,6 +428,7 @@ class SenderWorker(QObject):
                     elif any(e in err_str for e in _SKIP_ERRORS):
                         if "allow_payment_required" in err_str:
                             self._log(f"Скип {tag}: требуется оплата", "warn")
+                            self.paid_tag_signal.emit(tag_str)
                         elif "no user has" in err_str or "as username" in err_str:
                             self._log(f"Скип {tag}: тег не существует", "warn")
                         else:
@@ -430,6 +456,17 @@ class SenderWorker(QObject):
                     await self._sleep(self.interval_min * 60)
 
             if tag_completed and pastes_sent == len(self.pastes):
+                await asyncio.sleep(3)
+                try:
+                    from telethon import functions, types
+                    _e = await client.get_input_entity(tag_str)
+                    await client(functions.account.UpdateNotifySettingsRequest(
+                        peer=types.InputNotifyPeer(peer=_e),
+                        settings=types.InputPeerNotifySettings(mute_until=0)
+                    ))
+                except Exception:
+                    pass
+                prev_sent = True
                 self.tag_sent_signal.emit(self.worker_id, tag)
                 if self.tag_limit > 0:
                     tags_done += 1
@@ -437,6 +474,8 @@ class SenderWorker(QObject):
                         self._log(f"Лимит {self.tag_limit} тегов достигнут, останавливаемся", "ok")
                         await client.disconnect()
                         return
+            else:
+                prev_sent = False
 
         await client.disconnect()
 
@@ -446,11 +485,24 @@ class SenderWorker(QObject):
             t = text.lower()
             if len(t) < 20:
                 return False
-            bad = ("limited", "limitation", "limitazione", "limitado", "limitación",
-                   "begrenzt", "einschränkung", "beperkt", "ограничен", "limité",
-                   "limitert", "snížen", "omezení", "korlátozás", "sınırlı",
-                   "限制", "制限", "제한")
-            return not any(w in t for w in bad)
+            positive = (
+                "no limits", "good news", "free as a bird", "you're free",
+                "свободен", "нет ограничений", "хорошие новости",
+                "buone notizie", "libero come", "non esiste alcuna",
+                "keine einschränkung", "buenas noticias", "libre como",
+                "geen limiet", "geen enkele limiet", "goed nieuws",
+                "boas notícias", "livre como", "pas de limite",
+                "aucune limite", "sin límites",
+            )
+            if any(p in t for p in positive):
+                return True
+            bad = (
+                "i'm afraid", "к сожалению", "temo che", "lo siento",
+                "leider", "hélas", "unfortunately",
+                "limited until", "limitado hasta", "limitato fino",
+                "begrenzt bis", "ограничен до", "jusqu'au",
+            )
+            return not any(b in t for b in bad)
         from datetime import timezone as _tz
         import datetime as _dt
         try:
@@ -460,26 +512,23 @@ class SenderWorker(QObject):
                 try:
                     await client.send_message("@SpamBot", "/start")
                 except Exception as ex:
-                    self._log(f"SpamBot ошибка отправки: {ex}", "err")
+                    self._log(f"SpamBot ошибка: {ex}", "err")
                     continue
+                await asyncio.sleep(30)
                 reply_text, btn_labels = "", []
-                for _ in range(10):
-                    await asyncio.sleep(3)
-                    async for m in client.iter_messages("@SpamBot", limit=5):
-                        if m.out:
-                            continue
-                        if m.message and m.date.replace(tzinfo=_tz.utc) >= sent_at:
-                            reply_text = m.message
-                            if m.reply_markup:
-                                try:
-                                    for row in m.reply_markup.rows:
-                                        for btn in row.buttons:
-                                            if hasattr(btn, "text"):
-                                                btn_labels.append(btn.text)
-                                except AttributeError:
-                                    pass
-                            break
-                    if reply_text:
+                async for m in client.iter_messages("@SpamBot", limit=3):
+                    if m.out:
+                        continue
+                    if m.message and m.date.replace(tzinfo=_tz.utc) >= sent_at:
+                        reply_text = m.message
+                        if m.reply_markup:
+                            try:
+                                for row in m.reply_markup.rows:
+                                    for btn in row.buttons:
+                                        if hasattr(btn, "text"):
+                                            btn_labels.append(btn.text)
+                            except AttributeError:
+                                pass
                         break
                 if reply_text:
                     last_reply, buttons = reply_text, btn_labels
