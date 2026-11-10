@@ -301,6 +301,23 @@ class SenderWorker(QObject):
             await client.disconnect()
             return
 
+        from telethon import events as _events
+
+        @client.on(_events.NewMessage(incoming=True))
+        async def _on_incoming(event):
+            try:
+                sender = event.sender_id
+                entity = await client.get_entity(sender)
+                username = getattr(entity, "username", None)
+                if not username:
+                    return
+                tag_str = "@" + username
+                if tag_str not in self._replied_tags:
+                    self._replied_tags.append(tag_str)
+                    self.reply_signal.emit(self.worker_id, tag_str)
+            except Exception:
+                pass
+
         still_paid = set()
         for ptag in list(self.paid_tags):
             try:
@@ -372,14 +389,6 @@ class SenderWorker(QObject):
                     await client.send_message(tag_str, text)
                     self._log(f"ok  {tag_str}", "ok")
                     pastes_sent += 1
-                    try:
-                        async for m in client.iter_messages(tag_str, limit=1):
-                            if not m.out and m.message:
-                                if tag_str not in self._replied_tags:
-                                    self._replied_tags.append(tag_str)
-                                    self.reply_signal.emit(self.worker_id, tag_str)
-                    except Exception:
-                        pass
                 except FloodWaitError as e:
                     self._log(f"Flood {e.seconds}s  {tag}", "warn")
                     await self._sleep(e.seconds)
@@ -394,13 +403,16 @@ class SenderWorker(QObject):
                 except PeerFloodError:
                     self._log("PeerFlood - опрашиваем SpamBot...", "err")
                     reply, buttons, lifted = await self._query_spambot(client)
-                    if lifted:
-                        self._log(f"Спамблок снят, продолжаем с {tag}", "ok")
-                        continue
-                    else:
-                        self.spamblock_signal.emit(self.worker_id, tag, reply, buttons)
+                    self.spamblock_signal.emit(self.worker_id, tag, reply, buttons)
+                    if self._stop:
                         await client.disconnect()
                         return
+                    if not lifted:
+                        self._log("Ограничения не сняты, останавливаемся", "err")
+                        await client.disconnect()
+                        return
+                    tag_completed = False
+                    break
                 except Exception as ex:
                     err_str = str(ex).lower()
                     if "database is locked" in err_str:
@@ -456,16 +468,6 @@ class SenderWorker(QObject):
                     await self._sleep(self.interval_min * 60)
 
             if tag_completed and pastes_sent == len(self.pastes):
-                await asyncio.sleep(3)
-                try:
-                    from telethon import functions, types
-                    _e = await client.get_input_entity(tag_str)
-                    await client(functions.account.UpdateNotifySettingsRequest(
-                        peer=types.InputNotifyPeer(peer=_e),
-                        settings=types.InputPeerNotifySettings(mute_until=0)
-                    ))
-                except Exception:
-                    pass
                 prev_sent = True
                 self.tag_sent_signal.emit(self.worker_id, tag)
                 if self.tag_limit > 0:
@@ -485,24 +487,11 @@ class SenderWorker(QObject):
             t = text.lower()
             if len(t) < 20:
                 return False
-            positive = (
-                "no limits", "good news", "free as a bird", "you're free",
-                "свободен", "нет ограничений", "хорошие новости",
-                "buone notizie", "libero come", "non esiste alcuna",
-                "keine einschränkung", "buenas noticias", "libre como",
-                "geen limiet", "geen enkele limiet", "goed nieuws",
-                "boas notícias", "livre como", "pas de limite",
-                "aucune limite", "sin límites",
-            )
-            if any(p in t for p in positive):
-                return True
-            bad = (
-                "i'm afraid", "к сожалению", "temo che", "lo siento",
-                "leider", "hélas", "unfortunately",
-                "limited until", "limitado hasta", "limitato fino",
-                "begrenzt bis", "ограничен до", "jusqu'au",
-            )
-            return not any(b in t for b in bad)
+            bad = ("limited", "limitation", "limitazione", "limitado", "limitación",
+                   "begrenzt", "einschränkung", "beperkt", "ограничен", "limité",
+                   "limitert", "snížen", "omezení", "korlátozás", "sınırlı",
+                   "限制", "制限", "제한")
+            return not any(w in t for w in bad)
         from datetime import timezone as _tz
         import datetime as _dt
         try:
@@ -512,23 +501,26 @@ class SenderWorker(QObject):
                 try:
                     await client.send_message("@SpamBot", "/start")
                 except Exception as ex:
-                    self._log(f"SpamBot ошибка: {ex}", "err")
+                    self._log(f"SpamBot ошибка отправки: {ex}", "err")
                     continue
-                await asyncio.sleep(30)
                 reply_text, btn_labels = "", []
-                async for m in client.iter_messages("@SpamBot", limit=3):
-                    if m.out:
-                        continue
-                    if m.message and m.date.replace(tzinfo=_tz.utc) >= sent_at:
-                        reply_text = m.message
-                        if m.reply_markup:
-                            try:
-                                for row in m.reply_markup.rows:
-                                    for btn in row.buttons:
-                                        if hasattr(btn, "text"):
-                                            btn_labels.append(btn.text)
-                            except AttributeError:
-                                pass
+                for _ in range(10):
+                    await asyncio.sleep(3)
+                    async for m in client.iter_messages("@SpamBot", limit=5):
+                        if m.out:
+                            continue
+                        if m.message and m.date.replace(tzinfo=_tz.utc) >= sent_at:
+                            reply_text = m.message
+                            if m.reply_markup:
+                                try:
+                                    for row in m.reply_markup.rows:
+                                        for btn in row.buttons:
+                                            if hasattr(btn, "text"):
+                                                btn_labels.append(btn.text)
+                                except AttributeError:
+                                    pass
+                            break
+                    if reply_text:
                         break
                 if reply_text:
                     last_reply, buttons = reply_text, btn_labels
