@@ -308,6 +308,8 @@ class SenderWorker(QObject):
             try:
                 sender = event.sender_id
                 entity = await client.get_entity(sender)
+                if getattr(entity, "bot", False):
+                    return
                 username = getattr(entity, "username", None)
                 if not username:
                     return
@@ -346,9 +348,6 @@ class SenderWorker(QObject):
             if skipping:
                 if tag == self.resume_from:
                     skipping = False
-                # Всегда пропускаем тег, на котором остановились (resume_from),
-                # т.к. часть паст для него могла быть уже отправлена.
-                # Следующий тег после resume_from будет первым обработанным.
                 self._done += len(self.pastes)
                 continue
 
@@ -497,7 +496,7 @@ class SenderWorker(QObject):
         try:
             for attempt in range(3):
                 self._log(f"SpamBot /start {attempt+1}/3", "warn")
-                sent_at = _dt.datetime.now(_tz.utc)
+                sent_at = _dt.datetime.now(_tz.utc).replace(microsecond=0) - _dt.timedelta(seconds=2)
                 try:
                     await client.send_message("@SpamBot", "/start")
                 except Exception as ex:
@@ -509,7 +508,8 @@ class SenderWorker(QObject):
                     async for m in client.iter_messages("@SpamBot", limit=5):
                         if m.out:
                             continue
-                        if m.message and m.date.replace(tzinfo=_tz.utc) >= sent_at:
+                        msg_date = m.date if m.date.tzinfo else m.date.replace(tzinfo=_tz.utc)
+                        if m.message and msg_date >= sent_at:
                             reply_text = m.message
                             if m.reply_markup:
                                 try:
