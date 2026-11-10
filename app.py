@@ -59,7 +59,7 @@ def _check_license(key: str) -> tuple[bool, str]:
 class LicenseDialog(QDialog):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Lagos Sender — Активация")
+        self.setWindowTitle("Lagos Sender - Активация")
         self.setFixedWidth(420)
         self.setStyleSheet(STYLE)
         self._valid_key = ""
@@ -1274,8 +1274,55 @@ class MainWindow(QMainWindow):
         eta_col.addStretch()
         eta_col.addWidget(self.eta_lbl)
         gl.addLayout(eta_col)
+
+        shutdown_col = QVBoxLayout()
+        shutdown_col.addWidget(section_label("ВЫКЛЮЧЕНИЕ ПК"))
+        shutdown_col.addSpacing(6)
+        self._shutdown_check = QPushButton("Выкл. после отписей")
+        self._shutdown_check.setCheckable(True)
+        self._shutdown_check.setChecked(False)
+        self._shutdown_check.setFixedWidth(180)
+        self._shutdown_check.setStyleSheet("""
+            QPushButton { background: #1e2230; border: 1px solid #323a52; border-radius: 8px;
+                color: #a8b8d8; padding: 8px 12px; text-align: left; font-size: 12px; }
+            QPushButton:checked { background: #1e2a3a; border-color: #4a6fa5; color: #6b9ed4; }
+            QPushButton:hover { background: #252c42; }
+        """)
+        shutdown_col.addWidget(self._shutdown_check)
+
+        self._shutdown_time_check = QPushButton("Выкл. по времени")
+        self._shutdown_time_check.setCheckable(True)
+        self._shutdown_time_check.setChecked(False)
+        self._shutdown_time_check.setFixedWidth(180)
+        self._shutdown_time_check.setStyleSheet(self._shutdown_check.styleSheet())
+        shutdown_col.addWidget(self._shutdown_time_check)
+
+        self._shutdown_time_edit = StyledTimeEdit()
+        self._shutdown_time_edit.setTime(QTime.currentTime())
+        self._shutdown_time_edit.setFixedWidth(180)
+        shutdown_col.addWidget(self._shutdown_time_edit)
+
+        self._shutdown_time_check.toggled.connect(self._shutdown_time_edit.setEnabled)
+        self._shutdown_time_check.toggled.connect(self._on_shutdown_time_toggled)
+        self._shutdown_time_edit.setEnabled(False)
+
+        self._cancel_shutdown_btn = QPushButton("Отмена выкл.")
+        self._cancel_shutdown_btn.setFixedWidth(180)
+        self._cancel_shutdown_btn.setStyleSheet("""
+            QPushButton { background: #1e2230; border: 1px solid #323a52; border-radius: 8px;
+                color: #b06070; padding: 8px 12px; font-size: 12px; }
+            QPushButton:hover { background: #2a1e28; border-color: #b06070; color: #e08090; }
+        """)
+        self._cancel_shutdown_btn.clicked.connect(self._cancel_shutdown)
+        shutdown_col.addWidget(self._cancel_shutdown_btn)
+
+        shutdown_col.addStretch()
+        gl.addLayout(shutdown_col)
+
         gl.addStretch()
         lay.addWidget(glob)
+
+        self._shutdown_timer = None
 
         stats = QFrame()
         stats.setObjectName("card")
@@ -1710,7 +1757,7 @@ class MainWindow(QMainWindow):
             self._on_log(f"Платный тег сохранён: {tag}", "warn")
 
     def _on_session_kicked(self, worker_id, phone):
-        self._on_log(f"[W{worker_id+1}] СЕССИЯ КИКНУТА — {phone}", "err")
+        self._on_log(f"[W{worker_id+1}] СЕССИЯ КИКНУТА - {phone}", "err")
         for idx, w in list(self._workers.items()):
             if w and idx < len(self._worker_cards):
                 acc_idx = self._worker_cards[idx]["acc_combo"].currentIndex()
@@ -1753,12 +1800,52 @@ class MainWindow(QMainWindow):
             self._pause_btn.hide()
             self._on_finished_all()
 
+    def _do_shutdown_after(self):
+        import subprocess, sys
+        self._on_log("Выключение ПК через 60 сек. Нажми 'Отмена выкл.' чтобы отменить", "warn")
+        if sys.platform == "win32":
+            subprocess.Popen(["shutdown", "/s", "/t", "60"])
+        else:
+            subprocess.Popen(["shutdown", "-h", "+1"])
+
+    def _do_shutdown_at_time(self, target):
+        import subprocess, sys
+        now = QTime.currentTime()
+        secs = now.secsTo(target)
+        if secs < 0:
+            secs += 86400
+        mins = max(1, secs // 60)
+        self._on_log(f"Выключение ПК запланировано на {target.toString('HH:mm')} (через {mins} мин). Нажми 'Отмена выкл.' чтобы отменить", "warn")
+        if sys.platform == "win32":
+            subprocess.Popen(["shutdown", "/s", "/t", str(secs)])
+        else:
+            subprocess.Popen(["shutdown", "-h", f"+{mins}"])
+
+    def _cancel_shutdown(self):
+        import subprocess, sys
+        if sys.platform == "win32":
+            subprocess.Popen(["shutdown", "/a"])
+        else:
+            subprocess.Popen(["shutdown", "-c"])
+        self._on_log("Выключение отменено", "ok")
+
+    def _on_shutdown_time_toggled(self, checked):
+        if checked:
+            self._do_shutdown_at_time(self._shutdown_time_edit.time())
+        else:
+            self._cancel_shutdown()
+
+    def _check_shutdown_time(self):
+        pass
+
     def _on_finished_all(self):
         if self._failed_tags:
             out = (APP_DIR / "failed_recipients.txt").resolve()
             out.write_text("\n".join(self._failed_tags), encoding="utf-8")
             self._on_log(f"Неудачных: {len(self._failed_tags)}, сохранено в {out}", "warn")
         self._on_log("Все потоки завершены", "ok")
+        if getattr(self, "_shutdown_check", None) and self._shutdown_check.isChecked():
+            self._do_shutdown_after()
         self._total_msgs   = 0
         self._done_msgs    = 0
         self._ok_count     = 0
