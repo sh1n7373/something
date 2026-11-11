@@ -496,16 +496,16 @@ class SenderWorker(QObject):
         try:
             for attempt in range(3):
                 self._log(f"SpamBot /start {attempt+1}/3", "warn")
-                sent_at = _dt.datetime.now(_tz.utc).replace(microsecond=0) - _dt.timedelta(seconds=2)
                 try:
                     await client.send_message("@SpamBot", "/start")
                 except Exception as ex:
                     self._log(f"SpamBot ошибка отправки: {ex}", "err")
                     continue
+                sent_at = _dt.datetime.now(_tz.utc)
                 reply_text, btn_labels = "", []
                 for _ in range(10):
                     await asyncio.sleep(3)
-                    async for m in client.iter_messages("@SpamBot", limit=5):
+                    async for m in client.iter_messages("@SpamBot", limit=3):
                         if m.out:
                             continue
                         msg_date = m.date if m.date.tzinfo else m.date.replace(tzinfo=_tz.utc)
