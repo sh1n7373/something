@@ -502,6 +502,24 @@ class SenderWorker(QObject):
                 except Exception as ex:
                     self._log(f"SpamBot ошибка отправки: {ex}", "err")
                     continue
+                await asyncio.sleep(5)
+                try:
+                    thanks = "Cool, thanks"
+                    async for pm in client.iter_messages("@SpamBot", limit=1):
+                        if not pm.out and pm.reply_markup:
+                            try:
+                                for row in pm.reply_markup.rows:
+                                    for btn in row.buttons:
+                                        if hasattr(btn, "text") and btn.text:
+                                            t = btn.text.lower()
+                                            if any(w in t for w in ("cool", "хорошо", "genial", "super", "ottimo", "harika", "bedankt", "dziękuję", "добре", "bra", "okej", "hieno", "flott", "super", "jó", "super", "прекрасно", "好的", "了解", "알겠", "gut")):
+                                                thanks = btn.text
+                                                break
+                            except Exception:
+                                pass
+                    await client.send_message("@SpamBot", thanks)
+                except Exception:
+                    pass
                 reply_text, btn_labels = "", []
                 for _ in range(10):
                     await asyncio.sleep(3)
