@@ -303,6 +303,8 @@ class SenderWorker(QObject):
 
         from telethon import events as _events
 
+        recipient_tags_set = {recipient_tag(r).lower() for r in self.recipients}
+
         @client.on(_events.NewMessage(incoming=True))
         async def _on_incoming(event):
             try:
@@ -314,6 +316,8 @@ class SenderWorker(QObject):
                 if not username:
                     return
                 tag_str = "@" + username
+                if tag_str.lower() not in recipient_tags_set:
+                    return
                 if tag_str not in self._replied_tags:
                     self._replied_tags.append(tag_str)
                     self.reply_signal.emit(self.worker_id, tag_str)
@@ -322,8 +326,15 @@ class SenderWorker(QObject):
 
         still_paid = set()
         for ptag in list(self.paid_tags):
+            paid_rec = next((r for r in self.recipients if recipient_tag(r) == ptag), None)
+            paid_token = recipient_token(paid_rec) if paid_rec else ""
+            paid_ok = True
             try:
-                await client.send_message(ptag, self.pastes[0])
+                for paste in self.pastes:
+                    text = apply_token(paste, paid_token) if paid_token else paste
+                    await client.send_message(ptag, text)
+                    if self.interval_min > 0 and paste != self.pastes[-1]:
+                        await self._sleep(self.interval_min * 60)
                 self._log(f"Платный тег отписан: {ptag}", "ok")
             except Exception as ex:
                 if "allow_payment_required" in str(ex).lower():
@@ -391,6 +402,7 @@ class SenderWorker(QObject):
                 except FloodWaitError as e:
                     self._log(f"Flood {e.seconds}s  {tag}", "warn")
                     await self._sleep(e.seconds)
+                    continue
                 except (UserPrivacyRestrictedError, UsernameNotOccupiedError):
                     self._log(f"Недоступен  {tag}", "warn")
                     self.failed_signal.emit(tag)
@@ -406,12 +418,12 @@ class SenderWorker(QObject):
                     if self._stop:
                         await client.disconnect()
                         return
-                    if not lifted:
-                        self._log("Ограничения не сняты, останавливаемся", "err")
-                        await client.disconnect()
-                        return
-                    tag_completed = False
-                    break
+                    if lifted:
+                        self._log("Ограничения сняты, продолжаем", "ok")
+                        continue
+                    self._log("Ограничения не сняты, останавливаемся", "err")
+                    await client.disconnect()
+                    return
                 except Exception as ex:
                     err_str = str(ex).lower()
                     if "database is locked" in err_str:
@@ -467,6 +479,15 @@ class SenderWorker(QObject):
                     await self._sleep(self.interval_min * 60)
 
             if tag_completed and pastes_sent == len(self.pastes):
+                try:
+                    from telethon import functions, types as tl_types
+                    _e = await client.get_input_entity(tag_str)
+                    await client(functions.account.UpdateNotifySettingsRequest(
+                        peer=tl_types.InputNotifyPeer(peer=_e),
+                        settings=tl_types.InputPeerNotifySettings(mute_until=0)
+                    ))
+                except Exception:
+                    pass
                 prev_sent = True
                 self.tag_sent_signal.emit(self.worker_id, tag)
                 if self.tag_limit > 0:
@@ -496,27 +517,28 @@ class SenderWorker(QObject):
         try:
             for attempt in range(3):
                 self._log(f"SpamBot /start {attempt+1}/3", "warn")
-                sent_at = _dt.datetime.now(_tz.utc)
                 try:
                     await client.send_message("@SpamBot", "/start")
                 except Exception as ex:
                     self._log(f"SpamBot ошибка отправки: {ex}", "err")
                     continue
-                await asyncio.sleep(5)
+                sent_at = _dt.datetime.now(_tz.utc)
+                await asyncio.sleep(15)
                 try:
                     thanks = "Cool, thanks"
-                    async for pm in client.iter_messages("@SpamBot", limit=1):
-                        if not pm.out and pm.reply_markup:
+                    async for pm in client.iter_messages("@SpamBot", limit=5):
+                        if not pm.out and pm.reply_markup and pm.date.replace(tzinfo=_tz.utc) >= sent_at:
                             try:
                                 for row in pm.reply_markup.rows:
                                     for btn in row.buttons:
                                         if hasattr(btn, "text") and btn.text:
                                             t = btn.text.lower()
-                                            if any(w in t for w in ("cool", "хорошо", "genial", "super", "ottimo", "harika", "bedankt", "dziękuję", "добре", "bra", "okej", "hieno", "flott", "super", "jó", "super", "прекрасно", "好的", "了解", "알겠", "gut")):
+                                            if any(w in t for w in ("cool", "хорошо", "genial", "super", "ottimo", "harika", "bedankt", "dziękuję", "добре", "bra", "okej", "hieno", "flott", "jó", "прекрасно", "好的", "了解", "알겠", "gut")):
                                                 thanks = btn.text
                                                 break
                             except Exception:
                                 pass
+                            break
                     await client.send_message("@SpamBot", thanks)
                 except Exception:
                     pass
