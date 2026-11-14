@@ -549,6 +549,10 @@ class SenderWorker(QObject):
                     if attempt < 2:
                         self._log("SpamBot не ответил, пробуем ещё раз...", "warn")
                     continue
+                if _lifted(start_reply):
+                    self._log("Ограничения сняты", "ok")
+                    last_reply, lifted = start_reply, True
+                    break
                 thanks = "Cool, thanks"
                 try:
                     async for pm in client.iter_messages("@SpamBot", limit=5):
