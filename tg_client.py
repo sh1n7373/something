@@ -505,13 +505,24 @@ class SenderWorker(QObject):
         last_reply, buttons, lifted = "", [], False
         def _lifted(text):
             t = text.lower()
-            if len(t) < 20:
+            bad = (
+                "limited", "limitation", "limitazione", "limitado", "limitación",
+                "begrenzt", "einschränkung", "beperkt", "ограничен", "limité",
+                "limitert", "snížen", "omezení", "korlátozás", "sınırlı",
+                "限制", "制限", "제한", "no problem", "send /start",
+                "пожалуйста", "ответьте с помощью", "please use the buttons",
+                "but i can", "non-contacts", "non contacts",
+            )
+            good = (
+                "free as a bird", "no limits", "свободен", "нет ограничений",
+                "good news", "хорошие новости", "keine einschränkungen",
+                "geen beperkingen", "aucune limitation", "sin limitaciones",
+                "nessuna limitazione", "żadnych ograniczeń", "без обмежень",
+                "没有限制", "制限なし", "제한 없음",
+            )
+            if any(w in t for w in bad):
                 return False
-            bad = ("limited", "limitation", "limitazione", "limitado", "limitación",
-                   "begrenzt", "einschränkung", "beperkt", "ограничен", "limité",
-                   "limitert", "snížen", "omezení", "korlátozás", "sınırlı",
-                   "限制", "制限", "제한")
-            return not any(w in t for w in bad)
+            return any(w in t for w in good)
         from datetime import timezone as _tz
         import datetime as _dt
         try:
@@ -523,9 +534,23 @@ class SenderWorker(QObject):
                     self._log(f"SpamBot ошибка отправки: {ex}", "err")
                     continue
                 sent_at = _dt.datetime.now(_tz.utc)
-                await asyncio.sleep(15)
+                start_reply = ""
+                for _ in range(10):
+                    await asyncio.sleep(3)
+                    async for m in client.iter_messages("@SpamBot", limit=5):
+                        if m.out:
+                            continue
+                        if m.message and m.date.replace(tzinfo=_tz.utc) >= sent_at:
+                            start_reply = m.message
+                            break
+                    if start_reply:
+                        break
+                if not start_reply:
+                    if attempt < 2:
+                        self._log("SpamBot не ответил, пробуем ещё раз...", "warn")
+                    continue
+                thanks = "Cool, thanks"
                 try:
-                    thanks = "Cool, thanks"
                     async for pm in client.iter_messages("@SpamBot", limit=5):
                         if not pm.out and pm.reply_markup and pm.date.replace(tzinfo=_tz.utc) >= sent_at:
                             try:
@@ -540,15 +565,17 @@ class SenderWorker(QObject):
                                 pass
                             break
                     await client.send_message("@SpamBot", thanks)
+                    thanks_sent = True
                 except Exception:
-                    pass
+                    thanks_sent = False
+                thanks_at = _dt.datetime.now(_tz.utc) if thanks_sent else sent_at
                 reply_text, btn_labels = "", []
                 for _ in range(10):
                     await asyncio.sleep(3)
                     async for m in client.iter_messages("@SpamBot", limit=5):
                         if m.out:
                             continue
-                        if m.message and m.date.replace(tzinfo=_tz.utc) >= sent_at:
+                        if m.message and m.date.replace(tzinfo=_tz.utc) >= thanks_at:
                             reply_text = m.message
                             if m.reply_markup:
                                 try:
@@ -572,7 +599,7 @@ class SenderWorker(QObject):
                         self._log("Ограничения не сняты, пробуем ещё раз...", "warn")
                 else:
                     if attempt < 2:
-                        self._log("SpamBot не ответил, пробуем ещё раз...", "warn")
+                        self._log("SpamBot не ответил после thanks, пробуем ещё раз...", "warn")
         except Exception as ex:
             self._log(f"SpamBot ошибка: {ex}", "err")
         return last_reply, buttons, lifted
