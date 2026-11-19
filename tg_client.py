@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PyQt5.QtCore import QObject, pyqtSignal
 
-from storage import APP_DIR, recipient_tag, recipient_token, apply_token
+from storage import APP_DIR, recipient_tag, recipient_token, recipient_project, apply_token
 from device_profiles import get_client_kwargs, random_fingerprint
 
 SESSION_DIR = APP_DIR / "sessions"
@@ -225,8 +225,9 @@ class SenderWorker(QObject):
     spamblock_signal     = pyqtSignal(int, str, str, list)
     tag_sent_signal      = pyqtSignal(int, str)
     session_kicked_signal = pyqtSignal(int, str)
-    reply_signal         = pyqtSignal(int, str)
-    paid_tag_signal      = pyqtSignal(str)
+    reply_signal            = pyqtSignal(int, str)
+    paid_tag_signal         = pyqtSignal(str)
+    paid_tag_removed_signal = pyqtSignal(str)
 
     def __init__(self, account, recipients, pastes, interval_min,
                  proxy=None, tag_interval_min=0, worker_id=0, resume_from=None, tag_limit=0, paid_tags=None):
@@ -325,17 +326,22 @@ class SenderWorker(QObject):
                 pass
 
         still_paid = set()
+        sent_paid = set()
         for ptag in list(self.paid_tags):
+            if ptag in sent_paid:
+                continue
             paid_rec = next((r for r in self.recipients if recipient_tag(r) == ptag), None)
             paid_token = recipient_token(paid_rec) if paid_rec else ""
-            paid_ok = True
+            paid_project = recipient_project(paid_rec) if paid_rec else ""
             try:
-                for paste in self.pastes:
-                    text = apply_token(paste, paid_token) if paid_token else paste
+                for idx, paste in enumerate(self.pastes):
+                    text = apply_token(paste, paid_token, paid_project)
                     await client.send_message(ptag, text)
-                    if self.interval_min > 0 and paste != self.pastes[-1]:
+                    if idx < len(self.pastes) - 1 and self.interval_min > 0:
                         await self._sleep(self.interval_min * 60)
                 self._log(f"Платный тег отписан: {ptag}", "ok")
+                sent_paid.add(ptag)
+                self.paid_tag_removed_signal.emit(ptag)
             except Exception as ex:
                 if "allow_payment_required" in str(ex).lower():
                     still_paid.add(ptag)
@@ -353,8 +359,9 @@ class SenderWorker(QObject):
         tags_done = 0
 
         for rec in self.recipients:
-            tag   = recipient_tag(rec)
-            token = recipient_token(rec)
+            tag     = recipient_tag(rec)
+            token   = recipient_token(rec)
+            project = recipient_project(rec)
 
             if skipping:
                 if tag == self.resume_from:
@@ -390,7 +397,7 @@ class SenderWorker(QObject):
                     await asyncio.sleep(0.5)
 
                 try:
-                    text = apply_token(paste, token) if token else paste
+                    text = apply_token(paste, token, project)
                     tag_str = tag if isinstance(tag, str) else recipient_tag(tag)
                     if not tag_str:
                         self._log(f"Пустой тег, скип", "warn")
@@ -413,6 +420,8 @@ class SenderWorker(QObject):
                     break
                 except PeerFloodError:
                     self._log("PeerFlood - опрашиваем SpamBot...", "err")
+                    flood_attempt = getattr(self, "_flood_attempt", 0) + 1
+                    self._flood_attempt = flood_attempt
                     reply, buttons, lifted = await self._query_spambot(client)
                     self.spamblock_signal.emit(self.worker_id, tag, reply, buttons)
                     if self._stop:
@@ -420,8 +429,19 @@ class SenderWorker(QObject):
                         return
                     if lifted:
                         self._log("Ограничения сняты, продолжаем", "ok")
+                        self._flood_attempt = 0
                         continue
-                    self._log("Ограничения не сняты, останавливаемся", "err")
+                    if flood_attempt < 3:
+                        self._log(f"Спамблок попытка {flood_attempt}/4, пробуем следующий тег", "warn")
+                        tag_completed = False
+                        break
+                    if flood_attempt == 3:
+                        self._log("Спамблок попытка 4/4, пробуем следующий тег с задержкой 15 сек", "warn")
+                        await asyncio.sleep(15)
+                        tag_completed = False
+                        break
+                    self._log("4 попытки исчерпаны, останавливаемся", "err")
+                    self._flood_attempt = 0
                     await client.disconnect()
                     return
                 except Exception as ex:
@@ -507,15 +527,17 @@ class SenderWorker(QObject):
             t = text.lower()
             bad = (
                 "limited", "limitation", "limitazione", "limitado", "limitación",
-                "begrenzt", "einschränkung", "beperkt", "ограничен", "limité",
+                "begrenzt", "einschränkung", "beperkt", "limité",
                 "limitert", "snížen", "omezení", "korlátozás", "sınırlı",
                 "限制", "制限", "제한", "no problem", "send /start",
                 "пожалуйста", "ответьте с помощью", "please use the buttons",
                 "but i can", "non-contacts", "non contacts",
+                "временно ограничен", "аккаунт ограничен", "account is limited",
+                "account has been limited",
             )
             good = (
                 "free as a bird", "no limits", "свободен", "нет ограничений",
-                "good news", "хорошие новости", "keine einschränkungen",
+                "свободен от", "good news", "хорошие новости", "keine einschränkungen",
                 "geen beperkingen", "aucune limitation", "sin limitaciones",
                 "nessuna limitazione", "żadnych ograniczeń", "без обмежень",
                 "没有限制", "制限なし", "제한 없음",
@@ -831,4 +853,4 @@ class AllDialogsLoader(QObject):
             await client.disconnect()
             self.dialogs_loaded.emit(result)
         except Exception as ex:
-            self.error_signal.emit(str(ex))
+            self.error_signal.emit(str(ex)) 
