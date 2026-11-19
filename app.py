@@ -664,7 +664,7 @@ class MainWindow(QMainWindow):
 
         right.addWidget(section_label("СПИСКОМ"))
         self.rec_bulk = QPlainTextEdit()
-        self.rec_bulk.setPlaceholderText("@user1 - $TOKEN1\n@user2 - [job title]\n@user3 - $TOKEN {project}")
+        self.rec_bulk.setPlaceholderText("@user1 - $TOKEN1\n@user2 - [job title]\n@user3 - {project}")
         self.rec_bulk.setMaximumHeight(130)
         right.addWidget(self.rec_bulk)
         addm = AnimatedButton("Добавить всех")
@@ -749,8 +749,17 @@ class MainWindow(QMainWindow):
     def _refresh_recipients(self):
         self.rec_list.clear()
         for r in self._get_recs():
-            tag, token = recipient_tag(r), recipient_token(r)
-            self.rec_list.addItem(f"  {tag}  {token}" if token else f"  {tag}")
+            tag   = recipient_tag(r)
+            token = recipient_token(r)
+            proj  = recipient_project(r)
+            if token and proj:
+                self.rec_list.addItem(f"  {tag}  {token}  {{{proj}}}")
+            elif token:
+                self.rec_list.addItem(f"  {tag}  {token}")
+            elif proj:
+                self.rec_list.addItem(f"  {tag}  {{{proj}}}")
+            else:
+                self.rec_list.addItem(f"  {tag}")
         self.rec_count.setText(f"{len(self._get_recs())} тегов")
 
     def _add_tag_single(self):
