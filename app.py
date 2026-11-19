@@ -22,7 +22,7 @@ from PyQt5.QtGui import QIcon, QPainter, QColor
 from theme import STYLE, PASTE_LIST_STYLE, PROXY_LIST_STYLE, MONOSPACE_VIEW_STYLE, LOG_VIEW_STYLE
 from storage import (
     load_data, save_data, APP_DIR,
-    recipient_tag, recipient_token, parse_recipient_line, parse_recipients_bulk
+    recipient_tag, recipient_token, recipient_project, parse_recipient_line, parse_recipients_bulk
 )
 from tg_client import build_client, SenderWorker, ChatLoader, ChatLoaderRetry, SpamBotLoader, ProxyChecker, FingerprintChecker, SESSION_DIR
 from device_profiles import random_fingerprint
@@ -664,7 +664,7 @@ class MainWindow(QMainWindow):
 
         right.addWidget(section_label("СПИСКОМ"))
         self.rec_bulk = QPlainTextEdit()
-        self.rec_bulk.setPlaceholderText("@user1 - $TOKEN1\n@user2 - [job title]")
+        self.rec_bulk.setPlaceholderText("@user1 - $TOKEN1\n@user2 - [job title]\n@user3 - $TOKEN {project}")
         self.rec_bulk.setMaximumHeight(130)
         right.addWidget(self.rec_bulk)
         addm = AnimatedButton("Добавить всех")
@@ -756,10 +756,10 @@ class MainWindow(QMainWindow):
     def _add_tag_single(self):
         raw = self.rec_single.text().strip()
         if not raw: return
-        tag, token = parse_recipient_line(raw)
+        tag, token, project = parse_recipient_line(raw)
         recs = self._get_recs()
         if not any(recipient_tag(r) == tag for r in recs):
-            recs.append({"tag": tag, "token": token})
+            recs.append({"tag": tag, "token": token, "project": project})
             self._set_recs(recs)
             save_data(self.data)
             self._refresh_recipients()
@@ -825,7 +825,7 @@ class MainWindow(QMainWindow):
 
         right = QVBoxLayout()
         right.addWidget(section_label("ТЕКСТ СООБЩЕНИЯ"))
-        hint_p = QLabel("Замены в тексте:  $token - токен     [job] - должность(хайринг)")
+        hint_p = QLabel("Замены в тексте:  $token - токен     [job] - должность(хайринг)     {project} - проект")
         hint_p.setStyleSheet("color: #4e5a78; font-size: 11px;")
         right.addWidget(hint_p)
         self.paste_edit = QTextEdit()
@@ -1581,6 +1581,7 @@ class MainWindow(QMainWindow):
         worker.session_kicked_signal.connect(self._on_session_kicked)
         worker.reply_signal.connect(self._on_worker_reply)
         worker.paid_tag_signal.connect(self._on_paid_tag)
+        worker.paid_tag_removed_signal.connect(self._on_paid_tag_removed)
 
         self._workers[idx] = worker
         self._worker_totals[idx] = len(recs) * len(pastes)
@@ -1755,6 +1756,14 @@ class MainWindow(QMainWindow):
             self.data["paid_tags"] = paid
             save_data(self.data)
             self._on_log(f"Платный тег сохранён: {tag}", "warn")
+
+    def _on_paid_tag_removed(self, tag):
+        paid = self.data.get("paid_tags", [])
+        if tag in paid:
+            paid.remove(tag)
+            self.data["paid_tags"] = paid
+            save_data(self.data)
+            self._on_log(f"Платный тег удалён из БД: {tag}", "ok")
 
     def _on_session_kicked(self, worker_id, phone):
         self._on_log(f"[W{worker_id+1}] СЕССИЯ КИКНУТА - {phone}", "err")
