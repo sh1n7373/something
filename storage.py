@@ -28,6 +28,7 @@ _DEFAULTS = {
     "app_proxies": [],
     "active_app_proxy_idx": -1,
     "worker_last_tag": {},
+    "paid_tags": [],
 }
 
 _DICT_KEYS = {"chat_log", "account_proxies", "account_recipients"}
@@ -62,10 +63,17 @@ def recipient_token(r):
     return ""
 
 
-def apply_token(text, token):
+def recipient_project(r):
+    if isinstance(r, dict):
+        return r.get("project", "")
+    return ""
+
+
+def apply_token(text, token, project=""):
     text = re.sub(r'\$token', token, text, flags=re.IGNORECASE)
     job = re.sub(r'^\[(.+)\]$', r'\1', token).strip() if token else ''
     text = re.sub(r'\[job\]', job, text, flags=re.IGNORECASE)
+    text = re.sub(r'\{project\}', project, text, flags=re.IGNORECASE)
     return text
 
 
@@ -73,12 +81,21 @@ def parse_recipient_line(line):
     line = line.strip()
     m = re.match(r'^(@?\S+)\s*[-]\s*(.+)$', line)
     if m:
-        tag, token = m.group(1).strip(), m.group(2).strip()
+        tag, rest = m.group(1).strip(), m.group(2).strip()
+        pm = re.match(r'^\{(.+?)\}$', rest)
+        if pm:
+            token, project = "", pm.group(1).strip()
+        else:
+            pm2 = re.match(r'^(.+?)\s*\{(.+?)\}\s*$', rest)
+            if pm2:
+                token, project = pm2.group(1).strip(), pm2.group(2).strip()
+            else:
+                token, project = rest, ""
     else:
-        tag, token = line, ""
+        tag, token, project = line, "", ""
     if not tag.startswith("@"):
         tag = "@" + tag
-    return tag, token
+    return tag, token, project
 
 
 def parse_recipients_bulk(text):
@@ -86,6 +103,6 @@ def parse_recipients_bulk(text):
     for line in text.splitlines():
         line = line.strip()
         if line:
-            tag, token = parse_recipient_line(line)
-            result.append({"tag": tag, "token": token})
+            tag, token, project = parse_recipient_line(line)
+            result.append({"tag": tag, "token": token, "project": project})
     return result
